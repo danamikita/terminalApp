@@ -48,7 +48,8 @@
     "publish": {
       "provider": "github",
       "owner": "danamikita",
-      "repo": "terminalApp"
+      "repo": "terminalApp",
+      "releaseType": "release"
     }
   },
   "author": "danamikita"
