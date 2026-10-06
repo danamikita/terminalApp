@@ -17,7 +17,8 @@
     </div>
     <div id="main">
       <div id="main-toolbar">
-        <button id="split-toggle" title="Toggle split view">⬓ Split view</button>
+        <button id="feedback-btn" class="toolbar-btn" title="Report a problem or suggest something">🐛 Feedback</button>
+        <button id="split-toggle" class="toolbar-btn" title="Toggle split view">⬓ Split view</button>
       </div>
       <div id="main-body">
         <div id="slot-files" class="slot">
@@ -40,6 +41,35 @@
       <div id="modal-buttons">
         <button id="modal-cancel">Cancel</button>
         <button id="modal-ok">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="feedback-overlay" class="hidden">
+    <div id="feedback-modal">
+      <div id="feedback-title-bar">Send Feedback</div>
+
+      <label class="feedback-label" for="feedback-type">Type</label>
+      <select id="feedback-type">
+        <option value="bug">Bug — something isn't working</option>
+        <option value="enhancement">Idea — something that would help</option>
+      </select>
+
+      <label class="feedback-label" for="feedback-title">Title</label>
+      <input id="feedback-title" type="text" placeholder="Short summary" />
+
+      <label class="feedback-label" for="feedback-body">Details</label>
+      <textarea id="feedback-body" rows="6" placeholder="What happened? What did you expect to happen?"></textarea>
+
+      <p id="feedback-note">
+        Opens a pre-filled issue on GitHub in your browser — nothing is sent
+        until you review and submit it there. Your app version and OS are
+        included to help with triage.
+      </p>
+
+      <div id="feedback-buttons">
+        <button id="feedback-cancel">Cancel</button>
+        <button id="feedback-submit">Open on GitHub</button>
       </div>
     </div>
   </div>

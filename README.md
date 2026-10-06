@@ -73,6 +73,10 @@ npm run dev
 - **✕ (folder row)** — remove a folder (kills any running sessions in it)
 - **✕ (session row)** — kill that session
 - **⬓ Split view** — show the file browser and the active terminal side by side
+- **🐛 Feedback** — opens a pre-filled "New Issue" page on GitHub in your
+  browser (with your app version and OS included) so bugs and ideas land
+  straight in the repo's issue tracker; nothing is sent until you submit it
+  there yourself
 
 Sessions and the file browser both live in the main pane; clicking between rows
 in the sidebar switches what's shown there. Sessions keep running until you kill

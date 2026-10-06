@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { loadConfig, saveConfig, makeFolder } from '../src/config';
 import { AppState, FolderConfig, FolderSnapshot } from '../src/types';
 import { PtySession } from '../src/pty-session';
@@ -253,3 +254,14 @@ ipcMain.handle('fs:open-external', (_e, args: { filePath: string }) => {
 });
 
 ipcMain.handle('git:info', (_e, args: { dirPath: string }) => getGitInfo(args.dirPath));
+
+ipcMain.handle('app:get-info', () => ({
+  version: app.getVersion(),
+  platform: process.platform,
+  osRelease: os.release(),
+}));
+
+ipcMain.handle('app:open-external-url', (_e, args: { url: string }) => {
+  shell.openExternal(args.url);
+  return { ok: true };
+});

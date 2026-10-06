@@ -35,6 +35,17 @@ const modalInput = document.getElementById('modal-input');
 const modalOk = document.getElementById('modal-ok');
 const modalCancel = document.getElementById('modal-cancel');
 
+const feedbackBtn = document.getElementById('feedback-btn');
+const feedbackOverlay = document.getElementById('feedback-overlay');
+const feedbackModal = document.getElementById('feedback-modal');
+const feedbackType = document.getElementById('feedback-type');
+const feedbackTitleInput = document.getElementById('feedback-title');
+const feedbackBodyInput = document.getElementById('feedback-body');
+const feedbackCancelBtn = document.getElementById('feedback-cancel');
+const feedbackSubmitBtn = document.getElementById('feedback-submit');
+
+const REPO_URL = 'https://github.com/danamikita/terminalApp';
+
 function openModal(label, defaultValue, callback) {
   modalLabel.textContent = label;
   modalInput.value = defaultValue || '';
@@ -409,6 +420,42 @@ splitToggleBtn.addEventListener('click', () => {
   splitMode = !splitMode;
   splitToggleBtn.classList.toggle('active', splitMode);
   applyLayout();
+});
+
+function buildIssueUrl(type, title, body, info) {
+  const label = type === 'enhancement' ? 'enhancement' : 'bug';
+  const fullBody = `${body}\n\n---\nApp version: ${info.version}\nPlatform: ${info.platform} (${info.osRelease})`;
+  const params = new URLSearchParams({ title, body: fullBody, labels: label });
+  return `${REPO_URL}/issues/new?${params.toString()}`;
+}
+
+feedbackBtn.addEventListener('click', () => {
+  feedbackType.value = 'bug';
+  feedbackTitleInput.value = '';
+  feedbackBodyInput.value = '';
+  feedbackOverlay.classList.remove('hidden');
+  feedbackTitleInput.focus();
+});
+
+feedbackCancelBtn.addEventListener('click', () => {
+  feedbackOverlay.classList.add('hidden');
+});
+
+feedbackModal.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape') feedbackCancelBtn.click();
+});
+
+feedbackSubmitBtn.addEventListener('click', async () => {
+  const title = feedbackTitleInput.value.trim();
+  if (!title) {
+    feedbackTitleInput.focus();
+    return;
+  }
+  const body = feedbackBodyInput.value.trim();
+  const info = await ipcRenderer.invoke('app:get-info');
+  const url = buildIssueUrl(feedbackType.value, title, body, info);
+  await ipcRenderer.invoke('app:open-external-url', { url });
+  feedbackOverlay.classList.add('hidden');
 });
 
 ipcRenderer.on('session:data', (_e, { sessionId, data }) => {
