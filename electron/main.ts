@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import { loadConfig, saveConfig, makeFolder } from '../src/config';
 import { AppState, FolderConfig, FolderSnapshot } from '../src/types';
 import { PtySession } from '../src/pty-session';
+import { getGitInfo } from '../src/git';
 
 interface FolderState extends FolderConfig {
   sessions: PtySession[];
@@ -250,3 +251,5 @@ ipcMain.handle('fs:open-external', (_e, args: { filePath: string }) => {
   shell.openPath(args.filePath);
   return { ok: true };
 });
+
+ipcMain.handle('git:info', (_e, args: { dirPath: string }) => getGitInfo(args.dirPath));

@@ -10,6 +10,7 @@ const collapsed = new Set();
 const sessionTerms = new Map(); // sessionId -> { term, fitAddon, container }
 
 const folderBrowseDir = new Map(); // folderId -> last-browsed directory (sticky)
+const gitInfo = new Map(); // folderId -> GitInfo
 let filesPanelState = null; // null | { folderId, view: 'listing'|'markdown', markdownPath?, markdownReturnDir? }
 let activeSessionId = null;
 let singleModeShowing = 'placeholder'; // 'placeholder' | 'files' | 'session' -- which slot wins when not split
@@ -76,6 +77,41 @@ function el(tag, className, text) {
   return node;
 }
 
+function buildGitBadge(folder) {
+  const info = gitInfo.get(folder.id);
+  if (!info || !info.isRepo) return null;
+
+  const badge = el('span', 'git-badge');
+  badge.appendChild(el('span', 'git-branch', `⎇ ${info.branch}`));
+  if (info.dirty > 0) {
+    const dirty = el('span', 'git-dirty', `●${info.dirty}`);
+    dirty.title = `${info.dirty} uncommitted change${info.dirty === 1 ? '' : 's'}`;
+    badge.appendChild(dirty);
+  }
+  if (info.ahead > 0) {
+    const ahead = el('span', 'git-ahead', `↑${info.ahead}`);
+    ahead.title = `${info.ahead} commit${info.ahead === 1 ? '' : 's'} ahead of upstream`;
+    badge.appendChild(ahead);
+  }
+  if (info.behind > 0) {
+    const behind = el('span', 'git-behind', `↓${info.behind}`);
+    behind.title = `${info.behind} commit${info.behind === 1 ? '' : 's'} behind upstream`;
+    badge.appendChild(behind);
+  }
+  return badge;
+}
+
+async function refreshGitInfo() {
+  for (const folder of state.folders) {
+    try {
+      gitInfo.set(folder.id, await ipcRenderer.invoke('git:info', { dirPath: folder.path }));
+    } catch {
+      gitInfo.set(folder.id, { isRepo: false });
+    }
+  }
+  renderSidebar();
+}
+
 function renderSidebar() {
   folderListEl.innerHTML = '';
 
@@ -89,6 +125,9 @@ function renderSidebar() {
     const row = el('div', 'folder-row');
     row.appendChild(el('span', 'folder-arrow', isCollapsed ? '▸' : '▾'));
     row.appendChild(el('span', 'folder-name', folder.name));
+
+    const gitBadge = buildGitBadge(folder);
+    if (gitBadge) row.appendChild(gitBadge);
 
     const runningCount = folder.sessions.filter((s) => s.status === 'running').length;
     if (runningCount > 0) row.appendChild(el('span', 'folder-count', `(${runningCount})`));
@@ -326,10 +365,11 @@ async function removeFolder(folder) {
   }
   const res = await ipcRenderer.invoke('app:remove-folder', { folderId: folder.id });
   state = res.state;
+  gitInfo.delete(folder.id);
+  folderBrowseDir.delete(folder.id);
 
   if (filesPanelState && filesPanelState.folderId === folder.id) {
     filesPanelState = null;
-    folderBrowseDir.delete(folder.id);
     if (singleModeShowing === 'files') singleModeShowing = 'placeholder';
   }
   if (activeSessionId && folder.sessions.some((s) => s.id === activeSessionId)) {
@@ -361,6 +401,7 @@ addFolderBtn.addEventListener('click', async () => {
       alert(res.error);
     }
     renderSidebar();
+    refreshGitInfo();
   });
 });
 
@@ -392,4 +433,6 @@ window.addEventListener('resize', () => {
   state = await ipcRenderer.invoke('app:get-state');
   renderSidebar();
   applyLayout();
+  refreshGitInfo();
+  setInterval(refreshGitInfo, 10000);
 })();

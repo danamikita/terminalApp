@@ -29,3 +29,7 @@ export interface FolderSnapshot {
 export interface AppState {
   folders: FolderSnapshot[];
 }
+
+export type GitInfo =
+  | { isRepo: false }
+  | { isRepo: true; branch: string; dirty: number; ahead: number; behind: number };

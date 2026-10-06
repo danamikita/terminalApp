@@ -17,6 +17,8 @@ browser with native Markdown preview.
 - **Markdown preview** — click a `.md` file to render it inline (sanitized with DOMPurify)
 - **Split view** — see the file browser and a terminal side by side
 - **Native folder picker** — no typing paths by hand
+- **Live git status per folder** — current branch, uncommitted change count,
+  and ahead/behind upstream, refreshed automatically
 
 ## Download
 

@@ -88,6 +88,31 @@ html, body {
   font-size: 11px;
 }
 
+.git-badge {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: #8a8a8a;
+  max-width: 45%;
+}
+
+.git-branch {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-dirty {
+  color: #e2c08d;
+}
+
+.git-ahead,
+.git-behind {
+  color: #6a9955;
+}
+
 .row-btn {
   background: transparent;
   border: none;
