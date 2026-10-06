@@ -18,7 +18,20 @@ browser with native Markdown preview.
 - **Split view** — see the file browser and a terminal side by side
 - **Native folder picker** — no typing paths by hand
 
-## Getting started
+## Download
+
+Grab the latest Windows installer from the
+[Releases page](https://github.com/danamikita/terminalApp/releases/latest).
+The app checks for updates on launch (and every few hours while running) and
+will prompt to restart when a new version has downloaded — no need to
+reinstall manually after the first time.
+
+> **Note:** installers aren't code-signed yet, so Windows SmartScreen will
+> warn that it's from an unknown publisher on first install. Click
+> "More info" → "Run anyway" to proceed. This doesn't affect auto-updates
+> once installed.
+
+## Getting started (from source)
 
 ### Prerequisites
 
@@ -89,3 +102,27 @@ The renderer runs with `nodeIntegration` enabled and no context isolation —
 this is a trusted local tool, not something that loads remote or untrusted web
 content. Markdown file contents are rendered as HTML, so they're parsed with
 `marked` and sanitized with `DOMPurify` before being inserted into the page.
+
+## Releasing a new version
+
+Builds and publishes happen automatically on GitHub Actions when a `v*` tag
+is pushed — [`.github/workflows/release.yml`](.github/workflows/release.yml)
+builds the Windows installer with `electron-builder` and publishes it as a
+GitHub Release, which is also the update feed the app checks.
+
+```bash
+npm version patch   # or minor / major — bumps package.json and creates the tag
+git push --follow-tags
+```
+
+That's it — the workflow builds, signs nothing (see the note above), and
+uploads the installer plus the metadata (`latest.yml`) `electron-updater`
+needs to detect and download the new version.
+
+To build an installer locally without publishing:
+
+```bash
+npm run dist
+```
+
+Output goes to `release/` (gitignored).

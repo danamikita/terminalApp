@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
+import { autoUpdater } from 'electron-updater';
 import * as path from 'path';
 import * as fs from 'fs';
 import { loadConfig, saveConfig, makeFolder } from '../src/config';
@@ -104,7 +105,35 @@ function createWindow(): void {
   });
 }
 
-app.whenReady().then(createWindow);
+function setupAutoUpdate(): void {
+  if (!app.isPackaged) return;
+
+  autoUpdater.on('update-downloaded', (info) => {
+    dialog
+      .showMessageBox(win!, {
+        type: 'info',
+        buttons: ['Restart now', 'Later'],
+        defaultId: 0,
+        message: `Version ${info.version} has been downloaded.`,
+        detail: 'Restart to install the update.',
+      })
+      .then(({ response }) => {
+        if (response === 0) autoUpdater.quitAndInstall();
+      });
+  });
+
+  autoUpdater.on('error', (err) => {
+    console.log(`[updater] ${err.message}`);
+  });
+
+  autoUpdater.checkForUpdatesAndNotify();
+  setInterval(() => autoUpdater.checkForUpdatesAndNotify(), 4 * 60 * 60 * 1000);
+}
+
+app.whenReady().then(() => {
+  createWindow();
+  setupAutoUpdate();
+});
 
 app.on('window-all-closed', () => {
   app.quit();
