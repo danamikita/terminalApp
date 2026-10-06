@@ -22,6 +22,14 @@ jobs:
 
       - run: npm run build
 
+      # Pre-create the release so electron-builder attaches assets to it
+      # instead of racing to create one itself — when it does that across
+      # multiple artifacts it can create duplicate releases for the same tag.
+      - name: Create GitHub release
+        run: gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --notes "Automated release"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build and publish
         run: npx electron-builder --publish always
         env:
