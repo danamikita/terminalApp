@@ -1,4 +1,4 @@
-const { ipcRenderer } = require('electron');
+const { ipcRenderer, clipboard } = require('electron');
 const path = require('path');
 const { Terminal } = require('@xterm/xterm');
 const { FitAddon } = require('@xterm/addon-fit');
@@ -266,6 +266,21 @@ function ensureTerminalForSession(sessionId) {
   const fitAddon = new FitAddon();
   term.loadAddon(fitAddon);
   term.open(container);
+
+  term.attachCustomKeyEventHandler((ev) => {
+    if (ev.type !== 'keydown' || !ev.ctrlKey || ev.altKey || ev.metaKey) return true;
+    const key = ev.key.toLowerCase();
+    if (key === 'c' && term.hasSelection()) {
+      clipboard.writeText(term.getSelection());
+      return false;
+    }
+    if (key === 'v') {
+      const text = clipboard.readText();
+      if (text) ipcRenderer.send('session:write', { sessionId, data: text });
+      return false;
+    }
+    return true;
+  });
 
   term.onData((data) => {
     ipcRenderer.send('session:write', { sessionId, data });
