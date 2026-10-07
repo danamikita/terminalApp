@@ -144,21 +144,44 @@ app.on('window-all-closed', () => {
 
 ipcMain.handle('app:get-state', () => getState());
 
-ipcMain.handle('app:pick-directory', async () => {
+ipcMain.handle('app:pick-directory', async (_e, args?: { title?: string }) => {
   if (!win) return null;
-  const result = await dialog.showOpenDialog(win, { properties: ['openDirectory'] });
+  const result = await dialog.showOpenDialog(win, {
+    properties: ['openDirectory'],
+    title: args?.title,
+  });
   if (result.canceled || result.filePaths.length === 0) return null;
   return result.filePaths[0];
 });
+
+function registerFolder(name: string, resolved: string): void {
+  const folder: FolderState = { ...makeFolder(name, resolved), sessions: [], expanded: true };
+  folders.push(folder);
+  persist();
+}
 
 ipcMain.handle('app:add-folder', (_e, args: { folderPath: string; name: string }) => {
   const resolved = path.resolve(args.folderPath);
   if (!pathIsValidDir(resolved)) {
     return { ok: false, error: `Not a directory: ${resolved}`, state: getState() };
   }
-  const folder: FolderState = { ...makeFolder(args.name.trim() || path.basename(resolved), resolved), sessions: [], expanded: true };
-  folders.push(folder);
-  persist();
+  registerFolder(args.name.trim() || path.basename(resolved), resolved);
+  return { ok: true, state: getState() };
+});
+
+ipcMain.handle('app:create-folder', (_e, args: { parentPath: string; name: string }) => {
+  const name = args.name.trim();
+  if (!name) return { ok: false, error: 'Name is required', state: getState() };
+  const resolved = path.resolve(args.parentPath, name);
+  if (fs.existsSync(resolved)) {
+    return { ok: false, error: `Already exists: ${resolved}`, state: getState() };
+  }
+  try {
+    fs.mkdirSync(resolved, { recursive: true });
+  } catch (e) {
+    return { ok: false, error: `Could not create folder: ${(e as Error).message}`, state: getState() };
+  }
+  registerFolder(name, resolved);
   return { ok: true, state: getState() };
 });
 

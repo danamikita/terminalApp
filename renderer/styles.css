@@ -35,6 +35,11 @@ html, body {
   border-bottom: 1px solid #333;
 }
 
+#sidebar-header-actions {
+  display: flex;
+  gap: 6px;
+}
+
 #sidebar-header button {
   background: #0e639c;
   color: #fff;

@@ -19,6 +19,7 @@ let splitMode = false;
 const folderListEl = document.getElementById('folder-list');
 const terminalsEl = document.getElementById('terminals');
 const addFolderBtn = document.getElementById('add-folder-btn');
+const newFolderBtn = document.getElementById('new-folder-btn');
 
 const mainBodyEl = document.getElementById('main-body');
 const slotFilesEl = document.getElementById('slot-files');
@@ -448,6 +449,23 @@ addFolderBtn.addEventListener('click', async () => {
   openModal('Display name:', basename(dir), async (name) => {
     if (name === null) return;
     const res = await ipcRenderer.invoke('app:add-folder', { folderPath: dir, name: name.trim() || basename(dir) });
+    state = res.state;
+    if (!res.ok) {
+      alert(res.error);
+    }
+    renderSidebar();
+    refreshGitInfo();
+  });
+});
+
+newFolderBtn.addEventListener('click', async () => {
+  const parentDir = await ipcRenderer.invoke('app:pick-directory', { title: 'Choose where to create the new folder' });
+  if (!parentDir) return;
+  openModal('New folder name:', '', async (name) => {
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const res = await ipcRenderer.invoke('app:create-folder', { parentPath: parentDir, name: trimmed });
     state = res.state;
     if (!res.ok) {
       alert(res.error);
