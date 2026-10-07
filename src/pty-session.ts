@@ -18,19 +18,22 @@ const SHELL = os.platform() === 'win32' ? 'cmd.exe' : (process.env.SHELL || '/bi
 export class PtySession {
   readonly id = randomUUID();
   readonly folderId: string;
-  readonly name: string;
+  name: string;
   readonly command: string;
   readonly cwd: string;
 
   status: SessionStatus = 'running';
   exitCode: number | undefined;
+  lastCommand: string | undefined;
 
   private proc: pty.IPty;
   private cols: number;
   private rows: number;
+  private inputLine = '';
 
   onData?: (data: string) => void;
   onExit?: () => void;
+  onLastCommandChange?: () => void;
 
   constructor(opts: SessionOptions) {
     this.folderId = opts.folderId;
@@ -64,8 +67,36 @@ export class PtySession {
     });
   }
 
+  rename(newName: string): void {
+    const trimmed = newName.trim();
+    if (trimmed) this.name = trimmed;
+  }
+
   write(data: string): void {
     if (data && this.status === 'running') this.proc.write(data);
+    this.trackInputLine(data);
+  }
+
+  private trackInputLine(data: string): void {
+    if (!data || data.startsWith('\x1b')) return; // arrow keys / escape sequences
+    if (data === '\r' || data === '\n') {
+      const cmd = this.inputLine.trim();
+      this.inputLine = '';
+      if (cmd) {
+        this.lastCommand = cmd;
+        this.onLastCommandChange?.();
+      }
+      return;
+    }
+    if (data === '\x7f' || data === '\b') {
+      this.inputLine = this.inputLine.slice(0, -1);
+      return;
+    }
+    if (data === '\x03') {
+      this.inputLine = ''; // Ctrl+C cancels the in-progress line
+      return;
+    }
+    this.inputLine += data;
   }
 
   resize(cols: number, rows: number): void {

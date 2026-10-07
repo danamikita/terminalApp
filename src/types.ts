@@ -14,6 +14,7 @@ export interface SessionSnapshot {
   folderId: string;
   name: string;
   command: string;
+  lastCommand?: string;
   status: 'running' | 'exited';
   exitCode?: number;
 }

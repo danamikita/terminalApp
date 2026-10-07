@@ -165,11 +165,27 @@ html, body {
   color: #6e7681;
 }
 
-.session-name {
+.session-info {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.session-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.session-sub {
+  font-size: 11px;
+  color: #888;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: Consolas, "Courier New", monospace;
 }
 
 .empty-hint {

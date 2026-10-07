@@ -184,7 +184,24 @@ function renderSidebar() {
 
         const dot = el('span', `status-dot ${session.status}`, '●');
         sRow.appendChild(dot);
-        sRow.appendChild(el('span', 'session-name', session.name));
+
+        const info = el('div', 'session-info');
+        info.appendChild(el('span', 'session-name', session.name));
+        const lastCmd = session.lastCommand || session.command;
+        if (lastCmd) {
+          const sub = el('span', 'session-sub', lastCmd);
+          sub.title = lastCmd;
+          info.appendChild(sub);
+        }
+        sRow.appendChild(info);
+
+        const renameBtn = el('button', 'row-btn', '✎');
+        renameBtn.title = 'Rename session';
+        renameBtn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          renameSession(session);
+        });
+        sRow.appendChild(renameBtn);
 
         const killBtn = el('button', 'row-btn', '✕');
         killBtn.title = 'Kill session';
@@ -366,6 +383,15 @@ async function killSession(sessionId) {
   const res = await ipcRenderer.invoke('app:kill-session', { sessionId });
   state = res.state;
   renderSidebar();
+}
+
+function renameSession(session) {
+  openModal('Rename session:', session.name, async (value) => {
+    if (value === null) return;
+    const res = await ipcRenderer.invoke('app:rename-session', { sessionId: session.id, name: value });
+    state = res.state;
+    renderSidebar();
+  });
 }
 
 async function removeFolder(folder) {

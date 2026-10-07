@@ -54,6 +54,7 @@ function getState(): AppState {
         folderId: s.folderId,
         name: s.name,
         command: s.command,
+        lastCommand: s.lastCommand,
         status: s.status,
         exitCode: s.exitCode,
       })),
@@ -201,6 +202,9 @@ ipcMain.handle('app:create-session', (_e, args: { folderId: string; command: str
   session.onExit = () => {
     pushState();
   };
+  session.onLastCommandChange = () => {
+    pushState();
+  };
   folder.sessions.push(session);
 
   return { ok: true, state: getState(), sessionId: session.id };
@@ -209,6 +213,13 @@ ipcMain.handle('app:create-session', (_e, args: { folderId: string; command: str
 ipcMain.handle('app:kill-session', (_e, args: { sessionId: string }) => {
   const session = findSession(args.sessionId);
   session?.kill();
+  return { ok: true, state: getState() };
+});
+
+ipcMain.handle('app:rename-session', (_e, args: { sessionId: string; name: string }) => {
+  const session = findSession(args.sessionId);
+  if (!session) return { ok: false, error: 'Session not found', state: getState() };
+  session.rename(args.name);
   return { ok: true, state: getState() };
 });
 
