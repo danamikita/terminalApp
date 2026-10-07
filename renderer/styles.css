@@ -193,6 +193,30 @@ html, body {
   font-family: Consolas, "Courier New", monospace;
 }
 
+.popup-menu {
+  position: fixed;
+  background: #2d2d30;
+  border: 1px solid #444;
+  border-radius: 4px;
+  padding: 4px 0;
+  min-width: 160px;
+  max-width: 320px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+}
+
+.popup-menu-item {
+  padding: 6px 12px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.popup-menu-item:hover {
+  background: #3a3d3e;
+}
+
 .empty-hint {
   color: #777;
   padding: 16px;

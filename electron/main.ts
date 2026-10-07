@@ -42,6 +42,18 @@ function pathIsValidDir(p: string): boolean {
   }
 }
 
+function findSlnFiles(dirPath: string): { name: string; path: string }[] {
+  try {
+    return fs
+      .readdirSync(dirPath, { withFileTypes: true })
+      .filter((d) => d.isFile() && d.name.toLowerCase().endsWith('.sln'))
+      .map((d) => ({ name: d.name, path: path.join(dirPath, d.name) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    return [];
+  }
+}
+
 function getState(): AppState {
   return {
     folders: folders.map<FolderSnapshot>((f) => ({
@@ -288,6 +300,8 @@ ipcMain.handle('fs:open-external', (_e, args: { filePath: string }) => {
 });
 
 ipcMain.handle('git:info', (_e, args: { dirPath: string }) => getGitInfo(args.dirPath));
+
+ipcMain.handle('app:list-sln', (_e, args: { dirPath: string }) => ({ files: findSlnFiles(args.dirPath) }));
 
 ipcMain.handle('app:get-info', () => ({
   version: app.getVersion(),

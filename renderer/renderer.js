@@ -11,6 +11,7 @@ const sessionTerms = new Map(); // sessionId -> { term, fitAddon, container }
 
 const folderBrowseDir = new Map(); // folderId -> last-browsed directory (sticky)
 const gitInfo = new Map(); // folderId -> GitInfo
+const slnFiles = new Map(); // folderId -> [{ name, path }]
 let filesPanelState = null; // null | { folderId, view: 'listing'|'markdown', markdownPath?, markdownReturnDir? }
 let activeSessionId = null;
 let singleModeShowing = 'placeholder'; // 'placeholder' | 'files' | 'session' -- which slot wins when not split
@@ -124,6 +125,65 @@ async function refreshGitInfo() {
   renderSidebar();
 }
 
+async function refreshSlnFiles() {
+  for (const folder of state.folders) {
+    try {
+      const res = await ipcRenderer.invoke('app:list-sln', { dirPath: folder.path });
+      slnFiles.set(folder.id, res.files || []);
+    } catch {
+      slnFiles.set(folder.id, []);
+    }
+  }
+  renderSidebar();
+}
+
+function closeMenu() {
+  const existing = document.getElementById('popup-menu');
+  if (existing) existing.remove();
+}
+
+function openMenu(anchorEl, items, onSelect) {
+  closeMenu();
+  const rect = anchorEl.getBoundingClientRect();
+  const menu = el('div', 'popup-menu');
+  menu.id = 'popup-menu';
+  menu.style.left = `${rect.left}px`;
+  menu.style.top = `${rect.bottom + 2}px`;
+  for (const item of items) {
+    const row = el('div', 'popup-menu-item', item.label);
+    row.title = item.label;
+    row.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      closeMenu();
+      onSelect(item);
+    });
+    menu.appendChild(row);
+  }
+  document.body.appendChild(menu);
+
+  setTimeout(() => {
+    document.addEventListener('click', closeMenu, { once: true });
+  }, 0);
+}
+
+function launchSlnFile(file) {
+  ipcRenderer.invoke('fs:open-external', { filePath: file.path });
+}
+
+function handleSlnClick(folder, anchorEl) {
+  const files = slnFiles.get(folder.id) || [];
+  if (files.length === 0) return;
+  if (files.length === 1) {
+    launchSlnFile(files[0]);
+    return;
+  }
+  openMenu(
+    anchorEl,
+    files.map((f) => ({ label: f.name, file: f })),
+    (item) => launchSlnFile(item.file)
+  );
+}
+
 function renderSidebar() {
   folderListEl.innerHTML = '';
 
@@ -143,6 +203,18 @@ function renderSidebar() {
 
     const runningCount = folder.sessions.filter((s) => s.status === 'running').length;
     if (runningCount > 0) row.appendChild(el('span', 'folder-count', `(${runningCount})`));
+
+    const slns = slnFiles.get(folder.id) || [];
+    if (slns.length > 0) {
+      const slnBtn = el('button', 'row-btn sln-btn', '🧩');
+      slnBtn.title =
+        slns.length === 1 ? `Open ${slns[0].name} in Visual Studio` : `Open solution (${slns.length} found)`;
+      slnBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        handleSlnClick(folder, slnBtn);
+      });
+      row.appendChild(slnBtn);
+    }
 
     const newBtn = el('button', 'row-btn', '+');
     newBtn.title = 'New session';
@@ -419,6 +491,7 @@ async function removeFolder(folder) {
   const res = await ipcRenderer.invoke('app:remove-folder', { folderId: folder.id });
   state = res.state;
   gitInfo.delete(folder.id);
+  slnFiles.delete(folder.id);
   folderBrowseDir.delete(folder.id);
 
   if (filesPanelState && filesPanelState.folderId === folder.id) {
@@ -455,6 +528,7 @@ addFolderBtn.addEventListener('click', async () => {
     }
     renderSidebar();
     refreshGitInfo();
+    refreshSlnFiles();
   });
 });
 
@@ -472,6 +546,7 @@ newFolderBtn.addEventListener('click', async () => {
     }
     renderSidebar();
     refreshGitInfo();
+    refreshSlnFiles();
   });
 });
 
@@ -540,5 +615,6 @@ window.addEventListener('resize', () => {
   renderSidebar();
   applyLayout();
   refreshGitInfo();
+  refreshSlnFiles();
   setInterval(refreshGitInfo, 10000);
 })();
