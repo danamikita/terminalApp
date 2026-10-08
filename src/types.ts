@@ -1,12 +1,19 @@
+export interface ResumableSession {
+  name: string;
+  command: string;
+}
+
 export interface FolderConfig {
   id: string;
   name: string;
   path: string;
   lastCommand?: string;
+  resumeSessions?: ResumableSession[];
 }
 
 export interface AppConfig {
   folders: FolderConfig[];
+  autoResume?: boolean;
 }
 
 export interface SessionSnapshot {
@@ -29,6 +36,7 @@ export interface FolderSnapshot {
 
 export interface AppState {
   folders: FolderSnapshot[];
+  autoResume: boolean;
 }
 
 export type GitInfo =

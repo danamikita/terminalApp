@@ -30,6 +30,7 @@ const terminalEmptyEl = document.getElementById('terminal-empty');
 const fileBrowserEl = document.getElementById('file-browser');
 const markdownPreviewEl = document.getElementById('markdown-preview');
 const splitToggleBtn = document.getElementById('split-toggle');
+const autoResumeToggleBtn = document.getElementById('auto-resume-toggle');
 
 const overlay = document.getElementById('modal-overlay');
 const modalLabel = document.getElementById('modal-label');
@@ -359,8 +360,16 @@ function ensureTerminalForSession(sessionId) {
     ipcRenderer.send('session:write', { sessionId, data });
   });
 
-  const entry = { term, fitAddon, container };
+  const entry = { term, fitAddon, container, ready: false, pending: [] };
   sessionTerms.set(sessionId, entry);
+
+  ipcRenderer.invoke('app:get-session-buffer', { sessionId }).then((res) => {
+    if (res && res.buffer) term.write(res.buffer);
+    for (const chunk of entry.pending) term.write(chunk);
+    entry.pending = [];
+    entry.ready = true;
+  });
+
   return entry;
 }
 
@@ -556,6 +565,17 @@ splitToggleBtn.addEventListener('click', () => {
   applyLayout();
 });
 
+function applyAutoResumeButton() {
+  autoResumeToggleBtn.classList.toggle('active', !!state.autoResume);
+}
+
+autoResumeToggleBtn.addEventListener('click', async () => {
+  const res = await ipcRenderer.invoke('app:set-auto-resume', { enabled: !state.autoResume });
+  state = res.state;
+  applyAutoResumeButton();
+  renderSidebar();
+});
+
 function buildIssueUrl(type, title, body, info) {
   const label = type === 'enhancement' ? 'enhancement' : 'bug';
   const fullBody = `${body}\n\n---\nApp version: ${info.version}\nPlatform: ${info.platform} (${info.osRelease})`;
@@ -594,11 +614,14 @@ feedbackSubmitBtn.addEventListener('click', async () => {
 
 ipcRenderer.on('session:data', (_e, { sessionId, data }) => {
   const entry = sessionTerms.get(sessionId);
-  if (entry) entry.term.write(data);
+  if (!entry) return;
+  if (entry.ready) entry.term.write(data);
+  else entry.pending.push(data);
 });
 
 ipcRenderer.on('app:state', (_e, newState) => {
   state = newState;
+  applyAutoResumeButton();
   renderSidebar();
 });
 
@@ -613,6 +636,7 @@ window.addEventListener('resize', () => {
 (async function init() {
   state = await ipcRenderer.invoke('app:get-state');
   renderSidebar();
+  applyAutoResumeButton();
   applyLayout();
   refreshGitInfo();
   refreshSlnFiles();

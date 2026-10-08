@@ -30,6 +30,9 @@ export class PtySession {
   private cols: number;
   private rows: number;
   private inputLine = '';
+  private buffer: string[] = [];
+  private bufferBytes = 0;
+  private readonly maxBufferBytes = 200_000;
 
   onData?: (data: string) => void;
   onExit?: () => void;
@@ -57,6 +60,7 @@ export class PtySession {
     }
 
     this.proc.onData((data) => {
+      this.pushBuffer(data);
       this.onData?.(data);
     });
 
@@ -65,6 +69,18 @@ export class PtySession {
       this.exitCode = exitCode;
       this.onExit?.();
     });
+  }
+
+  getBuffer(): string {
+    return this.buffer.join('');
+  }
+
+  private pushBuffer(data: string): void {
+    this.buffer.push(data);
+    this.bufferBytes += data.length;
+    while (this.bufferBytes > this.maxBufferBytes && this.buffer.length > 1) {
+      this.bufferBytes -= this.buffer.shift()!.length;
+    }
   }
 
   rename(newName: string): void {

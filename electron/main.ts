@@ -15,11 +15,15 @@ interface FolderState extends FolderConfig {
 
 const config = loadConfig();
 const folders: FolderState[] = config.folders.map((f) => ({ ...f, sessions: [], expanded: true }));
+let autoResumeEnabled = config.autoResume !== false;
 
 let win: BrowserWindow | null = null;
 
 function persist(): void {
-  saveConfig({ folders: folders.map(({ sessions, expanded, ...f }) => f) });
+  saveConfig({
+    folders: folders.map(({ sessions, expanded, ...f }) => f),
+    autoResume: autoResumeEnabled,
+  });
 }
 
 function findFolder(folderId: string): FolderState | undefined {
@@ -42,6 +46,53 @@ function pathIsValidDir(p: string): boolean {
   }
 }
 
+function buildResumeCommand(command: string): string {
+  const trimmed = command.trim();
+  const firstToken = trimmed.split(/\s+/)[0];
+  const hasResumeFlag = /(^|\s)--(continue|resume)\b/.test(trimmed);
+  if (firstToken === 'claude' && !hasResumeFlag) {
+    return `${trimmed} --continue`;
+  }
+  return trimmed;
+}
+
+function createSessionForFolder(folder: FolderState, command: string): PtySession | { error: string } {
+  if (!pathIsValidDir(folder.path)) {
+    return { error: `Folder path does not exist: ${folder.path}` };
+  }
+  let session: PtySession;
+  try {
+    session = new PtySession({
+      folderId: folder.id,
+      name: `${command.split(' ')[0]} #${folder.sessions.length + 1}`,
+      command,
+      cwd: folder.path,
+      cols: 80,
+      rows: 24,
+    });
+  } catch (e) {
+    return { error: `Could not start session: ${(e as Error).message}` };
+  }
+
+  session.onData = (data) => {
+    win?.webContents.send('session:data', { sessionId: session.id, data });
+  };
+  session.onExit = () => pushState();
+  session.onLastCommandChange = () => pushState();
+  folder.sessions.push(session);
+  return session;
+}
+
+function resumeSessionsOnStartup(): void {
+  if (!autoResumeEnabled) return;
+  for (const folder of folders) {
+    for (const entry of folder.resumeSessions || []) {
+      const result = createSessionForFolder(folder, buildResumeCommand(entry.command));
+      if (!('error' in result)) result.rename(entry.name);
+    }
+  }
+}
+
 function findSlnFiles(dirPath: string): { name: string; path: string }[] {
   try {
     return fs
@@ -56,6 +107,7 @@ function findSlnFiles(dirPath: string): { name: string; path: string }[] {
 
 function getState(): AppState {
   return {
+    autoResume: autoResumeEnabled,
     folders: folders.map<FolderSnapshot>((f) => ({
       id: f.id,
       name: f.name,
@@ -115,6 +167,12 @@ function createWindow(): void {
       }
     }
     for (const folder of folders) {
+      folder.resumeSessions = folder.sessions
+        .filter((s) => s.status === 'running')
+        .map((s) => ({ name: s.name, command: s.command }));
+    }
+    persist();
+    for (const folder of folders) {
       for (const session of folder.sessions) session.kill();
     }
   });
@@ -147,6 +205,7 @@ function setupAutoUpdate(): void {
 
 app.whenReady().then(() => {
   createWindow();
+  resumeSessionsOnStartup();
   setupAutoUpdate();
 });
 
@@ -210,39 +269,24 @@ ipcMain.handle('app:remove-folder', (_e, args: { folderId: string }) => {
 ipcMain.handle('app:create-session', (_e, args: { folderId: string; command: string }) => {
   const folder = findFolder(args.folderId);
   if (!folder) return { ok: false, error: 'Folder not found', state: getState() };
-  if (!pathIsValidDir(folder.path)) {
-    return { ok: false, error: `Folder path does not exist: ${folder.path}`, state: getState() };
-  }
   const command = args.command.trim() || 'claude';
   folder.lastCommand = command;
   persist();
 
-  let session: PtySession;
-  try {
-    session = new PtySession({
-      folderId: folder.id,
-      name: `${command.split(' ')[0]} #${folder.sessions.length + 1}`,
-      command,
-      cwd: folder.path,
-      cols: 80,
-      rows: 24,
-    });
-  } catch (e) {
-    return { ok: false, error: `Could not start session: ${(e as Error).message}`, state: getState() };
-  }
+  const result = createSessionForFolder(folder, command);
+  if ('error' in result) return { ok: false, error: result.error, state: getState() };
 
-  session.onData = (data) => {
-    win?.webContents.send('session:data', { sessionId: session.id, data });
-  };
-  session.onExit = () => {
-    pushState();
-  };
-  session.onLastCommandChange = () => {
-    pushState();
-  };
-  folder.sessions.push(session);
+  return { ok: true, state: getState(), sessionId: result.id };
+});
 
-  return { ok: true, state: getState(), sessionId: session.id };
+ipcMain.handle('app:get-session-buffer', (_e, args: { sessionId: string }) => ({
+  buffer: findSession(args.sessionId)?.getBuffer() || '',
+}));
+
+ipcMain.handle('app:set-auto-resume', (_e, args: { enabled: boolean }) => {
+  autoResumeEnabled = args.enabled;
+  persist();
+  return { ok: true, state: getState() };
 });
 
 ipcMain.handle('app:kill-session', (_e, args: { sessionId: string }) => {

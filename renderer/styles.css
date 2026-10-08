@@ -257,7 +257,7 @@ html, body {
   color: #fff;
 }
 
-#split-toggle.active {
+.toolbar-btn.active {
   background: #0e639c;
   border-color: #0e639c;
   color: #fff;
