@@ -3,6 +3,7 @@ import { autoUpdater } from 'electron-updater';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
+import { execFileSync } from 'child_process';
 import { loadConfig, saveConfig, makeFolder } from '../src/config';
 import { AppState, FolderConfig, FolderSnapshot } from '../src/types';
 import { PtySession } from '../src/pty-session';
@@ -203,11 +204,56 @@ function setupAutoUpdate(): void {
   setInterval(() => autoUpdater.checkForUpdatesAndNotify(), 4 * 60 * 60 * 1000);
 }
 
-app.whenReady().then(() => {
-  createWindow();
-  resumeSessionsOnStartup();
-  setupAutoUpdate();
-});
+const CONTEXT_MENU_KEY = 'AddToFoldersApp';
+
+function registerWindowsContextMenu(): void {
+  if (process.platform !== 'win32' || !app.isPackaged) return;
+  const exePath = process.execPath;
+  const run = (args: string[]) => execFileSync('reg', args, { stdio: 'ignore' });
+  try {
+    run(['add', `HKCU\\Software\\Classes\\Directory\\shell\\${CONTEXT_MENU_KEY}`, '/ve', '/d', 'Add to Folders', '/f']);
+    run(['add', `HKCU\\Software\\Classes\\Directory\\shell\\${CONTEXT_MENU_KEY}`, '/v', 'Icon', '/d', `"${exePath}",0`, '/f']);
+    run(['add', `HKCU\\Software\\Classes\\Directory\\shell\\${CONTEXT_MENU_KEY}\\command`, '/ve', '/d', `"${exePath}" "--add-folder" "%1"`, '/f']);
+
+    run(['add', `HKCU\\Software\\Classes\\Directory\\Background\\shell\\${CONTEXT_MENU_KEY}`, '/ve', '/d', 'Add this folder to Folders', '/f']);
+    run(['add', `HKCU\\Software\\Classes\\Directory\\Background\\shell\\${CONTEXT_MENU_KEY}`, '/v', 'Icon', '/d', `"${exePath}",0`, '/f']);
+    run(['add', `HKCU\\Software\\Classes\\Directory\\Background\\shell\\${CONTEXT_MENU_KEY}\\command`, '/ve', '/d', `"${exePath}" "--add-folder" "%V"`, '/f']);
+  } catch (e) {
+    console.log(`[context-menu] registration failed: ${(e as Error).message}`);
+  }
+}
+
+function handleAddFolderArg(argv: string[]): void {
+  const idx = argv.indexOf('--add-folder');
+  if (idx === -1 || idx + 1 >= argv.length) return;
+  const resolved = path.resolve(argv[idx + 1]);
+  if (!pathIsValidDir(resolved)) return;
+  if (!folders.some((f) => path.resolve(f.path) === resolved)) {
+    registerFolder(path.basename(resolved), resolved);
+    pushState();
+  }
+  if (win) {
+    if (win.isMinimized()) win.restore();
+    win.focus();
+  }
+}
+
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (_event, argv) => {
+    handleAddFolderArg(argv);
+  });
+
+  app.whenReady().then(() => {
+    createWindow();
+    resumeSessionsOnStartup();
+    registerWindowsContextMenu();
+    handleAddFolderArg(process.argv);
+    setupAutoUpdate();
+  });
+}
 
 app.on('window-all-closed', () => {
   app.quit();
