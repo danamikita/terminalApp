@@ -197,6 +197,7 @@ function renderSidebar() {
     const isCollapsed = collapsed.has(folder.id);
     const row = el('div', 'folder-row');
     row.appendChild(el('span', 'folder-arrow', isCollapsed ? '▸' : '▾'));
+    row.appendChild(el('span', 'folder-icon', '📦'));
     row.appendChild(el('span', 'folder-name', folder.name));
 
     const gitBadge = buildGitBadge(folder);

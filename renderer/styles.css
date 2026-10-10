@@ -65,14 +65,23 @@ html, body {
 .folder-row {
   display: flex;
   align-items: center;
-  padding: 6px 10px;
+  padding: 9px 10px 9px 7px;
   cursor: pointer;
   gap: 6px;
   user-select: none;
+  background: #31353a;
+  border-left: 3px solid #4a9eea;
+  border-top: 1px solid #3f4347;
+  border-bottom: 1px solid #202224;
+  margin-top: -1px;
+}
+
+.folder-row:first-child {
+  border-top: none;
 }
 
 .folder-row:hover {
-  background: #2a2d2e;
+  background: #393e44;
 }
 
 .folder-arrow {
@@ -81,11 +90,20 @@ html, body {
   font-size: 10px;
 }
 
+.folder-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
 .folder-name {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.1px;
+  color: #ffffff;
 }
 
 .folder-count {
