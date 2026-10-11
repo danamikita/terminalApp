@@ -29,6 +29,8 @@ const filesEmptyEl = document.getElementById('files-empty');
 const terminalEmptyEl = document.getElementById('terminal-empty');
 const fileBrowserEl = document.getElementById('file-browser');
 const markdownPreviewEl = document.getElementById('markdown-preview');
+const editorPaneEl = document.getElementById('editor-pane');
+const gitPanelEl = document.getElementById('git-panel');
 const splitToggleBtn = document.getElementById('split-toggle');
 const autoResumeToggleBtn = document.getElementById('auto-resume-toggle');
 
@@ -251,6 +253,18 @@ function renderSidebar() {
       filesRow.addEventListener('click', () => openFilesForFolder(folder));
       folderListEl.appendChild(filesRow);
 
+      const info = gitInfo.get(folder.id);
+      if (info && info.isRepo) {
+        const gitRow = el('div', 'session-row');
+        if (filesPanelState && filesPanelState.folderId === folder.id && filesPanelState.view === 'git' && (splitMode || singleModeShowing === 'files')) {
+          gitRow.classList.add('selected');
+        }
+        gitRow.appendChild(el('span', 'status-dot', '🌿'));
+        gitRow.appendChild(el('span', 'session-name', 'Git'));
+        gitRow.addEventListener('click', () => openGitForFolder(folder));
+        folderListEl.appendChild(gitRow);
+      }
+
       for (const session of folder.sessions) {
         const sRow = el('div', 'session-row');
         if (session.id === activeSessionId && (splitMode || singleModeShowing === 'session')) {
@@ -306,6 +320,8 @@ function applyLayout() {
   filesEmptyEl.classList.toggle('visible', !hasFiles);
   fileBrowserEl.classList.toggle('visible', hasFiles && filesPanelState.view === 'listing');
   markdownPreviewEl.classList.toggle('visible', hasFiles && filesPanelState.view === 'markdown');
+  editorPaneEl.classList.toggle('visible', hasFiles && filesPanelState.view === 'editor');
+  gitPanelEl.classList.toggle('visible', hasFiles && filesPanelState.view === 'git');
 
   const hasSession = activeSessionId !== null;
   terminalEmptyEl.classList.toggle('visible', !hasSession);
@@ -388,6 +404,7 @@ function openFilesForFolder(folder) {
 }
 
 function showFilesListing(folder, dirPath) {
+  if (!confirmDiscardEditorIfDirty()) return;
   filesPanelState = { folderId: folder.id, view: 'listing' };
   folderBrowseDir.set(folder.id, dirPath);
   singleModeShowing = 'files';
@@ -395,6 +412,8 @@ function showFilesListing(folder, dirPath) {
   renderSidebar();
   renderFileBrowserContents(folder, dirPath);
 }
+
+const BINARY_EXT = /\.(png|jpe?g|gif|bmp|ico|webp|pdf|zip|7z|rar|exe|dll|so|dylib|mp3|mp4|mov|wav|ttf|woff2?|bin)$/i;
 
 async function renderFileBrowserContents(folder, dirPath) {
   fileBrowserEl.innerHTML = '';
@@ -426,11 +445,13 @@ async function renderFileBrowserContents(folder, dirPath) {
       row.addEventListener('click', () => showFilesListing(folder, full));
     } else {
       const isMd = /\.(md|markdown)$/i.test(entry.name);
+      const isBinary = BINARY_EXT.test(entry.name);
       row.appendChild(el('span', 'fb-icon', isMd ? '📝' : '📄'));
       row.appendChild(el('span', 'fb-name', entry.name));
       row.addEventListener('click', () => {
         if (isMd) showMarkdownPreview(folder, full, dirPath);
-        else ipcRenderer.invoke('fs:open-external', { filePath: full });
+        else if (isBinary) ipcRenderer.invoke('fs:open-external', { filePath: full });
+        else openFileInEditor(folder, full, dirPath, false);
       });
     }
     fileBrowserEl.appendChild(row);
@@ -438,6 +459,7 @@ async function renderFileBrowserContents(folder, dirPath) {
 }
 
 function showMarkdownPreview(folder, filePath, returnDir) {
+  if (!confirmDiscardEditorIfDirty()) return;
   filesPanelState = { folderId: folder.id, view: 'markdown', markdownPath: filePath, markdownReturnDir: returnDir };
   singleModeShowing = 'files';
   applyLayout();
@@ -447,6 +469,10 @@ function showMarkdownPreview(folder, filePath, returnDir) {
   const backBtn = el('button', 'md-back', '← Back to files');
   backBtn.addEventListener('click', () => showFilesListing(folder, returnDir));
   markdownPreviewEl.appendChild(backBtn);
+
+  const editBtn = el('button', 'md-edit', '✎ Edit');
+  editBtn.addEventListener('click', () => openFileInEditor(folder, filePath, returnDir, true));
+  markdownPreviewEl.appendChild(editBtn);
 
   const body = el('div');
   body.id = 'markdown-body';
@@ -498,6 +524,9 @@ async function removeFolder(folder) {
     const confirmed = confirm(`Folder "${folder.name}" has ${running} running session(s). Kill and remove?`);
     if (!confirmed) return;
   }
+  if (filesPanelState && filesPanelState.folderId === folder.id && filesPanelState.view === 'editor') {
+    if (!confirmDiscardEditorIfDirty()) return;
+  }
   const res = await ipcRenderer.invoke('app:remove-folder', { folderId: folder.id });
   state = res.state;
   gitInfo.delete(folder.id);
@@ -507,6 +536,9 @@ async function removeFolder(folder) {
   if (filesPanelState && filesPanelState.folderId === folder.id) {
     filesPanelState = null;
     if (singleModeShowing === 'files') singleModeShowing = 'placeholder';
+  }
+  if (gitPanelState && gitPanelState.folderId === folder.id) {
+    gitPanelState = null;
   }
   if (activeSessionId && folder.sessions.some((s) => s.id === activeSessionId)) {
     activeSessionId = null;

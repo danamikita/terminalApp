@@ -7,7 +7,18 @@ import { execFileSync } from 'child_process';
 import { loadConfig, saveConfig, makeFolder } from '../src/config';
 import { AppState, FolderConfig, FolderSnapshot } from '../src/types';
 import { PtySession } from '../src/pty-session';
-import { getGitInfo } from '../src/git';
+import {
+  getGitInfo,
+  listBranches,
+  checkoutBranch,
+  gitPull,
+  gitPush,
+  getStatus,
+  stageFile,
+  unstageFile,
+  getDiff,
+  commitStaged,
+} from '../src/git';
 
 interface FolderState extends FolderConfig {
   sessions: PtySession[];
@@ -389,7 +400,41 @@ ipcMain.handle('fs:open-external', (_e, args: { filePath: string }) => {
   return { ok: true };
 });
 
+ipcMain.handle('fs:write-file', (_e, args: { filePath: string; content: string }) => {
+  try {
+    fs.writeFileSync(args.filePath, args.content, 'utf8');
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
 ipcMain.handle('git:info', (_e, args: { dirPath: string }) => getGitInfo(args.dirPath));
+
+ipcMain.handle('git:list-branches', (_e, args: { dirPath: string }) => listBranches(args.dirPath));
+
+ipcMain.handle('git:checkout-branch', (_e, args: { dirPath: string; branch: string }) =>
+  checkoutBranch(args.dirPath, args.branch)
+);
+
+ipcMain.handle('git:pull', (_e, args: { dirPath: string }) => gitPull(args.dirPath));
+
+ipcMain.handle('git:push', (_e, args: { dirPath: string }) => gitPush(args.dirPath));
+
+ipcMain.handle('git:status', (_e, args: { dirPath: string }) => getStatus(args.dirPath));
+
+ipcMain.handle('git:stage', (_e, args: { dirPath: string; relPath: string }) => stageFile(args.dirPath, args.relPath));
+
+ipcMain.handle('git:unstage', (_e, args: { dirPath: string; relPath: string }) =>
+  unstageFile(args.dirPath, args.relPath)
+);
+
+ipcMain.handle('git:diff', async (_e, args: { dirPath: string; relPath: string; staged: boolean; untracked?: boolean }) => {
+  const diff = await getDiff(args.dirPath, args.relPath, args.staged, args.untracked);
+  return { ok: true, diff };
+});
+
+ipcMain.handle('git:commit', (_e, args: { dirPath: string; message: string }) => commitStaged(args.dirPath, args.message));
 
 ipcMain.handle('app:list-sln', (_e, args: { dirPath: string }) => ({ files: findSlnFiles(args.dirPath) }));
 

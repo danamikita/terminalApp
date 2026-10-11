@@ -42,3 +42,28 @@ export interface AppState {
 export type GitInfo =
   | { isRepo: false }
   | { isRepo: true; branch: string; dirty: number; ahead: number; behind: number };
+
+export interface BranchInfo {
+  current: string;
+  locals: string[];
+  remotes: string[];
+}
+
+export type GitFileStatusCode = 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked' | 'conflicted';
+
+export interface GitChange {
+  path: string;
+  staged: boolean;
+  worktreeStatus: GitFileStatusCode | null;
+  indexStatus: GitFileStatusCode | null;
+  origPath?: string;
+}
+
+export interface GitStatusResult {
+  branch: string;
+  ahead: number;
+  behind: number;
+  changes: GitChange[];
+}
+
+export type GitOpResult = { ok: true; message?: string } | { ok: false; error: string };

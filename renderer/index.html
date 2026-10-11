@@ -29,6 +29,8 @@
           <div id="files-empty" class="pane-empty">Click <strong>Files</strong> under a folder to browse it.</div>
           <div id="file-browser" class="pane"></div>
           <div id="markdown-preview" class="pane"></div>
+          <div id="editor-pane" class="pane"></div>
+          <div id="git-panel" class="pane"></div>
         </div>
         <div id="slot-terminal" class="slot">
           <div id="terminal-empty" class="pane-empty">Select a session, or create one with the <strong>+</strong> next to a folder.</div>
@@ -78,6 +80,21 @@
     </div>
   </div>
 
+  <div id="commit-overlay" class="hidden">
+    <div id="commit-modal">
+      <div id="commit-title-bar">Commit staged changes</div>
+      <div id="commit-staged-count"></div>
+      <label class="feedback-label" for="commit-message">Message</label>
+      <textarea id="commit-message" rows="4" placeholder="Commit message"></textarea>
+      <div id="commit-buttons">
+        <button id="commit-cancel">Cancel</button>
+        <button id="commit-submit">Commit</button>
+      </div>
+    </div>
+  </div>
+
   <script src="./renderer.js"></script>
+  <script src="./editor.js"></script>
+  <script src="./git-panel.js"></script>
 </body>
 </html>
