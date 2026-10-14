@@ -201,15 +201,10 @@ function renderSidebar() {
   for (const folder of state.folders) {
     const isCollapsed = collapsed.has(folder.id);
     const row = el('div', 'folder-row');
-    row.appendChild(el('span', 'folder-arrow', isCollapsed ? '▸' : '▾'));
-    row.appendChild(el('span', 'folder-icon', '📦'));
-    row.appendChild(el('span', 'folder-name', folder.name));
-
-    const gitBadge = buildGitBadge(folder);
-    if (gitBadge) row.appendChild(gitBadge);
-
-    const runningCount = folder.sessions.filter((s) => s.status === 'running').length;
-    if (runningCount > 0) row.appendChild(el('span', 'folder-count', `(${runningCount})`));
+    const main = el('div', 'folder-main');
+    main.appendChild(el('span', 'folder-arrow', isCollapsed ? '▸' : '▾'));
+    main.appendChild(el('span', 'folder-icon', '📦'));
+    main.appendChild(el('span', 'folder-name', folder.name));
 
     const slns = slnFiles.get(folder.id) || [];
     if (slns.length > 0) {
@@ -220,7 +215,7 @@ function renderSidebar() {
         ev.stopPropagation();
         handleSlnClick(folder, slnBtn);
       });
-      row.appendChild(slnBtn);
+      main.appendChild(slnBtn);
     }
 
     const newBtn = el('button', 'row-btn', '+');
@@ -229,7 +224,7 @@ function renderSidebar() {
       ev.stopPropagation();
       promptNewSession(folder);
     });
-    row.appendChild(newBtn);
+    main.appendChild(newBtn);
 
     const trashBtn = el('button', 'row-btn', '✕');
     trashBtn.title = 'Remove folder';
@@ -237,7 +232,17 @@ function renderSidebar() {
       ev.stopPropagation();
       removeFolder(folder);
     });
-    row.appendChild(trashBtn);
+    main.appendChild(trashBtn);
+    row.appendChild(main);
+
+    const gitBadge = buildGitBadge(folder);
+    const runningCount = folder.sessions.filter((s) => s.status === 'running').length;
+    if (gitBadge || runningCount > 0) {
+      const meta = el('div', 'folder-meta');
+      if (gitBadge) meta.appendChild(gitBadge);
+      if (runningCount > 0) meta.appendChild(el('span', 'folder-count', `(${runningCount})`));
+      row.appendChild(meta);
+    }
 
     row.addEventListener('click', () => {
       if (isCollapsed) collapsed.delete(folder.id);
