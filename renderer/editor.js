@@ -16,11 +16,13 @@ const { cpp } = require('@codemirror/lang-cpp');
 const { java } = require('@codemirror/lang-java');
 const { php } = require('@codemirror/lang-php');
 
-let cmView = null;
-let editorDirty = false;
-let editorFilePath = null;
-let editorFolder = null;
-let editorReturnDir = null;
+// folderId -> Map(filePath -> { cmView, container, dirty, isMarkdown })
+const editorTabs = new Map();
+// folderId -> filePath of the active tab
+const activeEditorTab = new Map();
+
+let editorToolbarEl = null;
+let editorHostsEl = null;
 
 function languageExtensionFor(filePath, isMarkdown) {
   if (isMarkdown) return [markdown()];
@@ -74,26 +76,6 @@ function languageExtensionFor(filePath, isMarkdown) {
   }
 }
 
-function confirmDiscardEditorIfDirty() {
-  if (filesPanelState && filesPanelState.view === 'editor' && editorDirty) {
-    const ok = confirm(`Discard unsaved changes to ${basename(editorFilePath)}?`);
-    if (!ok) return false;
-  }
-  teardownEditor();
-  return true;
-}
-
-function teardownEditor() {
-  if (cmView) {
-    cmView.destroy();
-    cmView = null;
-  }
-  editorDirty = false;
-  editorFilePath = null;
-  editorFolder = null;
-  editorReturnDir = null;
-}
-
 function buildEditorTheme() {
   return EditorView.theme(
     {
@@ -110,52 +92,45 @@ function buildEditorTheme() {
   );
 }
 
-async function openFileInEditor(folder, filePath, returnDir, isMarkdown) {
-  if (!confirmDiscardEditorIfDirty()) return;
-  filesPanelState = { folderId: folder.id, view: 'editor', editorPath: filePath, editorReturnDir: returnDir, editorIsMarkdown: isMarkdown };
-  singleModeShowing = 'files';
-  applyLayout();
-  renderSidebar();
-  await renderEditorPane(folder, filePath, returnDir, isMarkdown);
+function ensureEditorScaffold() {
+  if (editorToolbarEl) return;
+  editorToolbarEl = el('div', 'editor-toolbar');
+  editorHostsEl = el('div', 'editor-hosts');
+  editorPaneEl.appendChild(editorToolbarEl);
+  editorPaneEl.appendChild(editorHostsEl);
 }
 
-async function renderEditorPane(folder, filePath, returnDir, isMarkdown) {
-  editorFolder = folder;
-  editorFilePath = filePath;
-  editorReturnDir = returnDir;
-  editorDirty = false;
+async function openFileInEditor(folder, filePath, isMarkdown) {
+  if (!editorTabs.has(folder.id)) editorTabs.set(folder.id, new Map());
+  const tabs = editorTabs.get(folder.id);
 
-  editorPaneEl.innerHTML = '';
-  const header = el('div', 'editor-header');
+  filesPanelState = { folderId: folder.id, view: 'editor' };
+  singleModeShowing = 'files';
 
-  const backBtn = el('button', 'md-back', '← Back to files');
-  backBtn.addEventListener('click', () => {
-    if (confirmDiscardEditorIfDirty()) showFilesListing(folder, returnDir);
-  });
-  header.appendChild(backBtn);
+  if (tabs.has(filePath)) {
+    activeEditorTab.set(folder.id, filePath);
+    applyLayout();
+    renderSidebar();
+    renderEditorPane(folder);
+    const tab = tabs.get(filePath);
+    if (tab.cmView) tab.cmView.focus();
+    return;
+  }
 
-  header.appendChild(el('span', 'editor-filename', basename(filePath)));
-
-  const dirtyDot = el('span', 'editor-dirty-dot', '●');
-  dirtyDot.style.visibility = 'hidden';
-  header.appendChild(dirtyDot);
-
-  const statusEl = el('span', 'editor-status', '');
-  header.appendChild(statusEl);
-
-  const saveBtn = el('button', 'md-edit', '💾 Save');
-  saveBtn.addEventListener('click', () => saveCurrentFile(dirtyDot, statusEl));
-  header.appendChild(saveBtn);
-
-  editorPaneEl.appendChild(header);
-
-  const host = el('div');
-  host.id = 'editor-cm-host';
-  editorPaneEl.appendChild(host);
+  ensureEditorScaffold();
+  const container = el('div', 'editor-tab-host');
+  editorHostsEl.appendChild(container);
+  tabs.set(filePath, { cmView: null, container, dirty: false, isMarkdown });
+  activeEditorTab.set(folder.id, filePath);
+  applyLayout();
+  renderSidebar();
+  renderEditorPane(folder);
 
   const res = await ipcRenderer.invoke('fs:read-file', { filePath });
+  if (!tabs.get(filePath)) return; // tab was closed while loading
+
   if (!res.ok) {
-    host.textContent = `Error: ${res.error}`;
+    container.textContent = `Error: ${res.error}`;
     return;
   }
 
@@ -167,50 +142,161 @@ async function renderEditorPane(folder, filePath, returnDir, isMarkdown) {
       {
         key: 'Mod-s',
         run: () => {
-          saveCurrentFile(dirtyDot, statusEl);
+          saveActiveTab(folder);
           return true;
         },
       },
     ]),
     EditorView.updateListener.of((update) => {
       if (update.docChanged) {
-        editorDirty = true;
-        dirtyDot.style.visibility = 'visible';
-        statusEl.textContent = '';
+        const tab = tabs.get(filePath);
+        if (tab && !tab.dirty) {
+          tab.dirty = true;
+          if (filesPanelState && filesPanelState.view === 'editor' && filesPanelState.folderId === folder.id) {
+            renderEditorPane(folder);
+          }
+        }
       }
     }),
   ];
 
   const editorState = EditorState.create({ doc: res.content, extensions });
-  cmView = new EditorView({ state: editorState, parent: host });
+  const cmView = new EditorView({ state: editorState, parent: container });
+  tabs.get(filePath).cmView = cmView;
+  if (filesPanelState && filesPanelState.view === 'editor' && filesPanelState.folderId === folder.id) {
+    cmView.focus();
+  }
 }
 
-async function saveCurrentFile(dirtyDot, statusEl) {
-  if (!cmView || !editorFilePath) return;
-  const content = cmView.state.doc.toString();
-  const res = await ipcRenderer.invoke('fs:write-file', { filePath: editorFilePath, content });
+function switchToTab(folder, filePath) {
+  activeEditorTab.set(folder.id, filePath);
+  renderEditorPane(folder);
+  const tab = editorTabs.get(folder.id)?.get(filePath);
+  if (tab && tab.cmView) tab.cmView.focus();
+}
+
+function closeTab(folder, filePath) {
+  const tabs = editorTabs.get(folder.id);
+  if (!tabs) return;
+  const tab = tabs.get(filePath);
+  if (!tab) return;
+
+  if (tab.dirty) {
+    const ok = confirm(`Discard unsaved changes to ${basename(filePath)}?`);
+    if (!ok) return;
+  }
+
+  if (tab.cmView) tab.cmView.destroy();
+  tab.container.remove();
+  tabs.delete(filePath);
+
+  if (activeEditorTab.get(folder.id) === filePath) {
+    const remaining = Array.from(tabs.keys());
+    if (remaining.length > 0) {
+      activeEditorTab.set(folder.id, remaining[remaining.length - 1]);
+      renderEditorPane(folder);
+    } else {
+      activeEditorTab.delete(folder.id);
+      showFilesListing(folder, folderBrowseDir.get(folder.id) || folder.path);
+    }
+  } else if (filesPanelState && filesPanelState.view === 'editor' && filesPanelState.folderId === folder.id) {
+    renderEditorPane(folder);
+  }
+}
+
+function closeAllTabsForFolder(folder) {
+  const tabs = editorTabs.get(folder.id);
+  if (!tabs || tabs.size === 0) return true;
+
+  const dirtyCount = Array.from(tabs.values()).filter((t) => t.dirty).length;
+  if (dirtyCount > 0) {
+    const ok = confirm(`Discard unsaved changes in ${dirtyCount} file(s)?`);
+    if (!ok) return false;
+  }
+
+  for (const tab of tabs.values()) {
+    if (tab.cmView) tab.cmView.destroy();
+    tab.container.remove();
+  }
+  editorTabs.delete(folder.id);
+  activeEditorTab.delete(folder.id);
+  return true;
+}
+
+function renderTabBar(folder) {
+  const bar = el('div', 'editor-tabbar');
+  const tabs = editorTabs.get(folder.id);
+  const activePath = activeEditorTab.get(folder.id);
+  if (tabs) {
+    for (const [filePath, tab] of tabs) {
+      const tabEl = el('div', 'editor-tab' + (filePath === activePath ? ' active' : ''));
+      tabEl.title = filePath;
+      tabEl.appendChild(el('span', 'editor-tab-name', basename(filePath)));
+      if (tab.dirty) tabEl.appendChild(el('span', 'editor-tab-dirty', '●'));
+      const closeBtn = el('button', 'editor-tab-close', '×');
+      closeBtn.title = 'Close';
+      closeBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        closeTab(folder, filePath);
+      });
+      tabEl.appendChild(closeBtn);
+      tabEl.addEventListener('click', () => switchToTab(folder, filePath));
+      bar.appendChild(tabEl);
+    }
+  }
+  return bar;
+}
+
+function renderEditorPane(folder, justSaved) {
+  ensureEditorScaffold();
+  editorToolbarEl.innerHTML = '';
+
+  const backBtn = el('button', 'md-back', '← Back to files');
+  backBtn.addEventListener('click', () => showFilesListing(folder, folderBrowseDir.get(folder.id) || folder.path));
+  editorToolbarEl.appendChild(backBtn);
+
+  editorToolbarEl.appendChild(renderTabBar(folder));
+
+  if (justSaved) {
+    editorToolbarEl.appendChild(el('span', 'editor-status', 'Saved'));
+    setTimeout(() => {
+      if (filesPanelState && filesPanelState.view === 'editor' && filesPanelState.folderId === folder.id) {
+        renderEditorPane(folder, false);
+      }
+    }, 1200);
+  }
+
+  const saveBtn = el('button', 'md-edit', '💾 Save');
+  saveBtn.addEventListener('click', () => saveActiveTab(folder));
+  editorToolbarEl.appendChild(saveBtn);
+
+  for (const [fId, tabs] of editorTabs) {
+    const activePath = activeEditorTab.get(fId);
+    for (const [filePath, tab] of tabs) {
+      const shouldShow =
+        fId === folder.id &&
+        filePath === activePath &&
+        filesPanelState &&
+        filesPanelState.view === 'editor' &&
+        filesPanelState.folderId === folder.id;
+      tab.container.classList.toggle('visible', shouldShow);
+    }
+  }
+}
+
+async function saveActiveTab(folder) {
+  const filePath = activeEditorTab.get(folder.id);
+  if (!filePath) return;
+  const tabs = editorTabs.get(folder.id);
+  const tab = tabs && tabs.get(filePath);
+  if (!tab || !tab.cmView) return;
+
+  const content = tab.cmView.state.doc.toString();
+  const res = await ipcRenderer.invoke('fs:write-file', { filePath, content });
   if (!res.ok) {
     alert(res.error);
     return;
   }
-  editorDirty = false;
-  if (dirtyDot) dirtyDot.style.visibility = 'hidden';
-
-  const folder = editorFolder;
-  const filePath = editorFilePath;
-  const returnDir = editorReturnDir;
-  const wasMarkdown = filesPanelState && filesPanelState.editorIsMarkdown;
-
-  if (wasMarkdown) {
-    teardownEditor();
-    showMarkdownPreview(folder, filePath, returnDir);
-    return;
-  }
-
-  if (statusEl) {
-    statusEl.textContent = 'Saved';
-    setTimeout(() => {
-      if (statusEl.textContent === 'Saved') statusEl.textContent = '';
-    }, 1500);
-  }
+  tab.dirty = false;
+  renderEditorPane(folder, true);
 }

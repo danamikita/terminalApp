@@ -4,8 +4,13 @@ import * as os from 'os';
 import { randomUUID } from 'crypto';
 import { AppConfig, FolderConfig } from './types';
 
-const CONFIG_DIR = path.join(os.homedir(), '.terminalapp');
-const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
+let CONFIG_DIR = path.join(os.homedir(), '.terminalapp');
+let CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
+
+export function setConfigDirName(dirName: string): void {
+  CONFIG_DIR = path.join(os.homedir(), dirName);
+  CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
+}
 
 export function loadConfig(): AppConfig {
   try {

@@ -21,6 +21,9 @@ const folderListEl = document.getElementById('folder-list');
 const terminalsEl = document.getElementById('terminals');
 const addFolderBtn = document.getElementById('add-folder-btn');
 const newFolderBtn = document.getElementById('new-folder-btn');
+const sidebarEl = document.getElementById('sidebar');
+const sidebarCollapseBtn = document.getElementById('sidebar-collapse-btn');
+const sidebarExpandBtn = document.getElementById('sidebar-expand-btn');
 
 const mainBodyEl = document.getElementById('main-body');
 const slotFilesEl = document.getElementById('slot-files');
@@ -404,7 +407,6 @@ function openFilesForFolder(folder) {
 }
 
 function showFilesListing(folder, dirPath) {
-  if (!confirmDiscardEditorIfDirty()) return;
   filesPanelState = { folderId: folder.id, view: 'listing' };
   folderBrowseDir.set(folder.id, dirPath);
   singleModeShowing = 'files';
@@ -451,7 +453,7 @@ async function renderFileBrowserContents(folder, dirPath) {
       row.addEventListener('click', () => {
         if (isMd) showMarkdownPreview(folder, full, dirPath);
         else if (isBinary) ipcRenderer.invoke('fs:open-external', { filePath: full });
-        else openFileInEditor(folder, full, dirPath, false);
+        else openFileInEditor(folder, full, false);
       });
     }
     fileBrowserEl.appendChild(row);
@@ -459,7 +461,6 @@ async function renderFileBrowserContents(folder, dirPath) {
 }
 
 function showMarkdownPreview(folder, filePath, returnDir) {
-  if (!confirmDiscardEditorIfDirty()) return;
   filesPanelState = { folderId: folder.id, view: 'markdown', markdownPath: filePath, markdownReturnDir: returnDir };
   singleModeShowing = 'files';
   applyLayout();
@@ -471,7 +472,7 @@ function showMarkdownPreview(folder, filePath, returnDir) {
   markdownPreviewEl.appendChild(backBtn);
 
   const editBtn = el('button', 'md-edit', '✎ Edit');
-  editBtn.addEventListener('click', () => openFileInEditor(folder, filePath, returnDir, true));
+  editBtn.addEventListener('click', () => openFileInEditor(folder, filePath, true));
   markdownPreviewEl.appendChild(editBtn);
 
   const body = el('div');
@@ -524,9 +525,7 @@ async function removeFolder(folder) {
     const confirmed = confirm(`Folder "${folder.name}" has ${running} running session(s). Kill and remove?`);
     if (!confirmed) return;
   }
-  if (filesPanelState && filesPanelState.folderId === folder.id && filesPanelState.view === 'editor') {
-    if (!confirmDiscardEditorIfDirty()) return;
-  }
+  if (!closeAllTabsForFolder(folder)) return;
   const res = await ipcRenderer.invoke('app:remove-folder', { folderId: folder.id });
   state = res.state;
   gitInfo.delete(folder.id);
@@ -597,6 +596,23 @@ splitToggleBtn.addEventListener('click', () => {
   splitToggleBtn.classList.toggle('active', splitMode);
   applyLayout();
 });
+
+function setSidebarCollapsed(collapsed) {
+  sidebarEl.classList.toggle('collapsed', collapsed);
+  sidebarExpandBtn.classList.toggle('visible', collapsed);
+  requestAnimationFrame(() => {
+    if (activeSessionId) {
+      const entry = sessionTerms.get(activeSessionId);
+      if (entry) {
+        entry.fitAddon.fit();
+        ipcRenderer.send('session:resize', { sessionId: activeSessionId, cols: entry.term.cols, rows: entry.term.rows });
+      }
+    }
+  });
+}
+
+sidebarCollapseBtn.addEventListener('click', () => setSidebarCollapsed(true));
+sidebarExpandBtn.addEventListener('click', () => setSidebarCollapsed(false));
 
 function applyAutoResumeButton() {
   autoResumeToggleBtn.classList.toggle('active', !!state.autoResume);

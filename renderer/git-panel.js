@@ -8,7 +8,6 @@ const commitSubmitBtn = document.getElementById('commit-submit');
 let commitModalFolder = null;
 
 async function openGitForFolder(folder) {
-  if (!confirmDiscardEditorIfDirty()) return;
   filesPanelState = { folderId: folder.id, view: 'git' };
   gitPanelState = {
     folderId: folder.id,

@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { execFileSync } from 'child_process';
-import { loadConfig, saveConfig, makeFolder } from '../src/config';
+import { loadConfig, saveConfig, makeFolder, setConfigDirName } from '../src/config';
 import { AppState, FolderConfig, FolderSnapshot } from '../src/types';
 import { PtySession } from '../src/pty-session';
 import {
@@ -25,6 +25,12 @@ interface FolderState extends FolderConfig {
   expanded: boolean;
 }
 
+if (!app.isPackaged) {
+  // Keep a dev run's userData (incl. the single-instance lock) and saved
+  // config separate from the installed app so both can run at once.
+  app.setName('terminalapp-dev');
+  setConfigDirName('.terminalapp-dev');
+}
 const config = loadConfig();
 const folders: FolderState[] = config.folders.map((f) => ({ ...f, sessions: [], expanded: true }));
 let autoResumeEnabled = config.autoResume !== false;
@@ -161,6 +167,33 @@ function createWindow(): void {
   });
   win.webContents.on('did-fail-load', (_e, code, desc) => {
     console.log(`[renderer] failed to load: ${code} ${desc}`);
+  });
+
+  const isExternalHttpUrl = (url: string): boolean => {
+    try {
+      const protocol = new URL(url).protocol;
+      return protocol === 'http:' || protocol === 'https:';
+    } catch {
+      return false;
+    }
+  };
+
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url === 'about:blank') return { action: 'allow' };
+    if (isExternalHttpUrl(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  win.webContents.on('did-create-window', (childWindow) => {
+    childWindow.webContents.on('will-navigate', (event, url) => {
+      event.preventDefault();
+      if (isExternalHttpUrl(url)) shell.openExternal(url);
+      childWindow.close();
+    });
+  });
+  win.webContents.on('will-navigate', (event, url) => {
+    if (url === win!.webContents.getURL()) return;
+    event.preventDefault();
+    if (isExternalHttpUrl(url)) shell.openExternal(url);
   });
 
   win.on('close', (event) => {
