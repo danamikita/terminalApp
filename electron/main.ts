@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { execFileSync } from 'child_process';
 import { loadConfig, saveConfig, makeFolder, setConfigDirName } from '../src/config';
-import { AppState, FolderConfig, FolderSnapshot } from '../src/types';
+import { AppState, FolderConfig, FolderSnapshot, ShellType } from '../src/types';
 import { PtySession } from '../src/pty-session';
 import {
   getGitInfo,
@@ -76,7 +76,7 @@ function buildResumeCommand(command: string): string {
   return trimmed;
 }
 
-function createSessionForFolder(folder: FolderState, command: string): PtySession | { error: string } {
+function createSessionForFolder(folder: FolderState, command: string, shell?: ShellType): PtySession | { error: string } {
   if (!pathIsValidDir(folder.path)) {
     return { error: `Folder path does not exist: ${folder.path}` };
   }
@@ -89,6 +89,7 @@ function createSessionForFolder(folder: FolderState, command: string): PtySessio
       cwd: folder.path,
       cols: 80,
       rows: 24,
+      shell,
     });
   } catch (e) {
     return { error: `Could not start session: ${(e as Error).message}` };
@@ -107,7 +108,7 @@ function resumeSessionsOnStartup(): void {
   if (!autoResumeEnabled) return;
   for (const folder of folders) {
     for (const entry of folder.resumeSessions || []) {
-      const result = createSessionForFolder(folder, buildResumeCommand(entry.command));
+      const result = createSessionForFolder(folder, buildResumeCommand(entry.command), entry.shell);
       if (!('error' in result)) result.rename(entry.name);
     }
   }
@@ -133,6 +134,7 @@ function getState(): AppState {
       name: f.name,
       path: f.path,
       lastCommand: f.lastCommand,
+      lastShell: f.lastShell,
       sessions: f.sessions.map((s) => ({
         id: s.id,
         folderId: s.folderId,
@@ -216,7 +218,7 @@ function createWindow(): void {
     for (const folder of folders) {
       folder.resumeSessions = folder.sessions
         .filter((s) => s.status === 'running')
-        .map((s) => ({ name: s.name, command: s.command }));
+        .map((s) => ({ name: s.name, command: s.command, shell: s.shell }));
     }
     persist();
     for (const folder of folders) {
@@ -384,14 +386,15 @@ ipcMain.handle('app:remove-folder', (_e, args: { folderId: string }) => {
   return { ok: true, state: getState() };
 });
 
-ipcMain.handle('app:create-session', (_e, args: { folderId: string; command: string }) => {
+ipcMain.handle('app:create-session', (_e, args: { folderId: string; command: string; shell?: ShellType }) => {
   const folder = findFolder(args.folderId);
   if (!folder) return { ok: false, error: 'Folder not found', state: getState() };
   const command = args.command.trim() || 'claude';
   folder.lastCommand = command;
+  folder.lastShell = args.shell;
   persist();
 
-  const result = createSessionForFolder(folder, command);
+  const result = createSessionForFolder(folder, command, args.shell);
   if ('error' in result) return { ok: false, error: result.error, state: getState() };
 
   return { ok: true, state: getState(), sessionId: result.id };

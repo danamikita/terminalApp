@@ -944,6 +944,72 @@ html, body {
   filter: brightness(1.15);
 }
 
+#session-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#session-overlay.hidden {
+  display: none;
+}
+
+#session-modal {
+  background: #2d2d30;
+  border: 1px solid #444;
+  border-radius: 6px;
+  padding: 18px;
+  width: 360px;
+  display: flex;
+  flex-direction: column;
+}
+
+#session-title-bar {
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: #eee;
+}
+
+#session-shell,
+#session-command {
+  width: 100%;
+  padding: 6px 8px;
+  background: #1e1e1e;
+  border: 1px solid #444;
+  color: #fff;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+#session-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+#session-buttons button {
+  padding: 6px 14px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  background: #3a3d3e;
+  color: #ddd;
+}
+
+#session-buttons #session-start {
+  background: #0e639c;
+  color: #fff;
+}
+
+#session-buttons button:hover {
+  filter: brightness(1.15);
+}
+
 #clone-overlay {
   position: fixed;
   inset: 0;

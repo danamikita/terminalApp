@@ -1,6 +1,9 @@
 import * as pty from 'node-pty';
 import { randomUUID } from 'crypto';
 import * as os from 'os';
+import * as fs from 'fs';
+import * as path from 'path';
+import { ShellType } from './types';
 
 export type SessionStatus = 'running' | 'exited';
 
@@ -11,9 +14,32 @@ export interface SessionOptions {
   cwd: string;
   cols: number;
   rows: number;
+  shell?: ShellType;
 }
 
-const SHELL = os.platform() === 'win32' ? 'cmd.exe' : (process.env.SHELL || '/bin/bash');
+function findBashPath(): string {
+  const programFilesDirs = [process.env['ProgramFiles'], process.env['ProgramFiles(x86)']].filter(
+    (p): p is string => !!p
+  );
+  for (const dir of programFilesDirs) {
+    const candidate = path.join(dir, 'Git', 'bin', 'bash.exe');
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return 'bash.exe'; // fall back to PATH resolution (e.g. WSL's bash.exe)
+}
+
+function resolveShell(shell: ShellType | undefined): string {
+  if (os.platform() !== 'win32') return process.env.SHELL || '/bin/bash';
+  switch (shell) {
+    case 'powershell':
+      return 'powershell.exe';
+    case 'bash':
+      return findBashPath();
+    case 'cmd':
+    default:
+      return 'cmd.exe';
+  }
+}
 
 export class PtySession {
   readonly id = randomUUID();
@@ -21,6 +47,7 @@ export class PtySession {
   name: string;
   readonly command: string;
   readonly cwd: string;
+  readonly shell: ShellType | undefined;
 
   status: SessionStatus = 'running';
   exitCode: number | undefined;
@@ -43,10 +70,11 @@ export class PtySession {
     this.name = opts.name;
     this.command = opts.command;
     this.cwd = opts.cwd;
+    this.shell = opts.shell;
     this.cols = opts.cols;
     this.rows = opts.rows;
 
-    this.proc = pty.spawn(SHELL, [], {
+    this.proc = pty.spawn(resolveShell(opts.shell), [], {
       name: 'xterm-256color',
       cols: opts.cols,
       rows: opts.rows,

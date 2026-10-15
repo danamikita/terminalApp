@@ -1,6 +1,9 @@
+export type ShellType = 'cmd' | 'powershell' | 'bash';
+
 export interface ResumableSession {
   name: string;
   command: string;
+  shell?: ShellType;
 }
 
 export interface FolderConfig {
@@ -8,6 +11,7 @@ export interface FolderConfig {
   name: string;
   path: string;
   lastCommand?: string;
+  lastShell?: ShellType;
   resumeSessions?: ResumableSession[];
 }
 
@@ -31,6 +35,7 @@ export interface FolderSnapshot {
   name: string;
   path: string;
   lastCommand?: string;
+  lastShell?: ShellType;
   sessions: SessionSnapshot[];
 }
 

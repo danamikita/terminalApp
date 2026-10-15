@@ -494,11 +494,30 @@ function showMarkdownPreview(folder, filePath, returnDir) {
   });
 }
 
-async function promptNewSession(folder) {
-  openModal('Command to run (e.g. claude):', folder.lastCommand || 'claude', async (value) => {
-    if (value === null) return;
-    const command = value.trim() || 'claude';
-    const res = await ipcRenderer.invoke('app:create-session', { folderId: folder.id, command });
+const sessionOverlay = document.getElementById('session-overlay');
+const sessionShellSelect = document.getElementById('session-shell');
+const sessionCommandInput = document.getElementById('session-command');
+const sessionCancelBtn = document.getElementById('session-cancel');
+const sessionStartBtn = document.getElementById('session-start');
+
+function promptNewSession(folder) {
+  sessionShellSelect.value = folder.lastShell || 'cmd';
+  sessionCommandInput.value = folder.lastCommand || 'claude';
+  sessionOverlay.classList.remove('hidden');
+  sessionCommandInput.focus();
+  sessionCommandInput.select();
+
+  function cleanup() {
+    sessionOverlay.classList.add('hidden');
+    sessionStartBtn.removeEventListener('click', onStart);
+    sessionCancelBtn.removeEventListener('click', onCancel);
+    sessionCommandInput.removeEventListener('keydown', onKey);
+  }
+  async function onStart() {
+    const shell = sessionShellSelect.value;
+    const command = sessionCommandInput.value.trim() || 'claude';
+    cleanup();
+    const res = await ipcRenderer.invoke('app:create-session', { folderId: folder.id, command, shell });
     state = res.state;
     if (!res.ok) {
       alert(res.error);
@@ -507,7 +526,17 @@ async function promptNewSession(folder) {
     }
     collapsed.delete(folder.id);
     selectSession(res.sessionId);
-  });
+  }
+  function onCancel() {
+    cleanup();
+  }
+  function onKey(ev) {
+    if (ev.key === 'Enter') onStart();
+    else if (ev.key === 'Escape') onCancel();
+  }
+  sessionStartBtn.addEventListener('click', onStart);
+  sessionCancelBtn.addEventListener('click', onCancel);
+  sessionCommandInput.addEventListener('keydown', onKey);
 }
 
 async function killSession(sessionId) {

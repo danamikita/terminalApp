@@ -83,6 +83,27 @@
     </div>
   </div>
 
+  <div id="session-overlay" class="hidden">
+    <div id="session-modal">
+      <div id="session-title-bar">New session</div>
+
+      <label class="feedback-label" for="session-shell">Shell</label>
+      <select id="session-shell">
+        <option value="cmd">Command Prompt</option>
+        <option value="powershell">PowerShell</option>
+        <option value="bash">Bash (Git Bash / WSL)</option>
+      </select>
+
+      <label class="feedback-label" for="session-command">Command to run</label>
+      <input id="session-command" type="text" placeholder="e.g. claude" />
+
+      <div id="session-buttons">
+        <button id="session-cancel">Cancel</button>
+        <button id="session-start">Start</button>
+      </div>
+    </div>
+  </div>
+
   <div id="clone-overlay" class="hidden">
     <div id="clone-modal">
       <div id="clone-title-bar">Clone repository</div>
