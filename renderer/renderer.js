@@ -21,6 +21,7 @@ const folderListEl = document.getElementById('folder-list');
 const terminalsEl = document.getElementById('terminals');
 const addFolderBtn = document.getElementById('add-folder-btn');
 const newFolderBtn = document.getElementById('new-folder-btn');
+const cloneRepoBtn = document.getElementById('clone-repo-btn');
 const sidebarEl = document.getElementById('sidebar');
 const sidebarCollapseBtn = document.getElementById('sidebar-collapse-btn');
 const sidebarExpandBtn = document.getElementById('sidebar-expand-btn');
@@ -576,6 +577,116 @@ addFolderBtn.addEventListener('click', async () => {
     refreshGitInfo();
     refreshSlnFiles();
   });
+});
+
+const cloneOverlay = document.getElementById('clone-overlay');
+const cloneUrlInput = document.getElementById('clone-url');
+const cloneDestInput = document.getElementById('clone-dest');
+const cloneBrowseBtn = document.getElementById('clone-browse-btn');
+const cloneNameInput = document.getElementById('clone-name');
+const cloneLogEl = document.getElementById('clone-log');
+const cloneCancelBtn = document.getElementById('clone-cancel');
+const cloneSubmitBtn = document.getElementById('clone-submit');
+
+let cloneDestDir = null;
+let cloning = false;
+
+function deriveRepoName(url) {
+  const trimmed = url.trim().replace(/\/+$/, '');
+  const last = trimmed.split(/[\\/]/).pop() || '';
+  return last.replace(/\.git$/i, '');
+}
+
+function resetCloneModal() {
+  cloneUrlInput.value = '';
+  cloneDestInput.value = '';
+  cloneDestDir = null;
+  cloneNameInput.value = '';
+  delete cloneNameInput.dataset.touched;
+  cloneLogEl.textContent = '';
+  cloneLogEl.classList.add('hidden');
+  cloning = false;
+  cloneSubmitBtn.disabled = false;
+  cloneSubmitBtn.textContent = 'Clone';
+  cloneCancelBtn.textContent = 'Cancel';
+}
+
+cloneRepoBtn.addEventListener('click', () => {
+  resetCloneModal();
+  cloneOverlay.classList.remove('hidden');
+  cloneUrlInput.focus();
+});
+
+cloneUrlInput.addEventListener('input', () => {
+  if (!cloneNameInput.dataset.touched) {
+    cloneNameInput.value = deriveRepoName(cloneUrlInput.value);
+  }
+});
+
+cloneNameInput.addEventListener('input', () => {
+  cloneNameInput.dataset.touched = '1';
+});
+
+cloneBrowseBtn.addEventListener('click', async () => {
+  const dir = await ipcRenderer.invoke('app:pick-directory', { title: 'Choose where to clone into' });
+  if (!dir) return;
+  cloneDestDir = dir;
+  cloneDestInput.value = dir;
+});
+
+cloneCancelBtn.addEventListener('click', () => {
+  if (cloning) {
+    ipcRenderer.send('app:clone-repo-cancel');
+    return;
+  }
+  cloneOverlay.classList.add('hidden');
+});
+
+cloneSubmitBtn.addEventListener('click', async () => {
+  if (cloning) return;
+  const url = cloneUrlInput.value.trim();
+  const name = cloneNameInput.value.trim();
+  if (!url) {
+    alert('Repository URL is required.');
+    return;
+  }
+  if (!cloneDestDir) {
+    alert('Choose a destination folder.');
+    return;
+  }
+  if (!name) {
+    alert('Folder name is required.');
+    return;
+  }
+
+  cloning = true;
+  cloneSubmitBtn.disabled = true;
+  cloneSubmitBtn.textContent = 'Cloning…';
+  cloneCancelBtn.textContent = 'Stop';
+  cloneLogEl.textContent = '';
+  cloneLogEl.classList.remove('hidden');
+
+  const res = await ipcRenderer.invoke('app:clone-repo', { parentPath: cloneDestDir, name, url });
+  cloning = false;
+  cloneSubmitBtn.disabled = false;
+  cloneSubmitBtn.textContent = 'Clone';
+  cloneCancelBtn.textContent = 'Close';
+
+  if (res.ok) {
+    state = res.state;
+    renderSidebar();
+    refreshGitInfo();
+    refreshSlnFiles();
+    cloneOverlay.classList.add('hidden');
+  } else {
+    cloneLogEl.textContent += `\nError: ${res.error}\n`;
+    cloneLogEl.scrollTop = cloneLogEl.scrollHeight;
+  }
+});
+
+ipcRenderer.on('git:clone-progress', (_e, { chunk }) => {
+  cloneLogEl.textContent += chunk.replace(/\r/g, '\n');
+  cloneLogEl.scrollTop = cloneLogEl.scrollHeight;
 });
 
 newFolderBtn.addEventListener('click', async () => {

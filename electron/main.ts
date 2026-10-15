@@ -18,6 +18,7 @@ import {
   unstageFile,
   getDiff,
   commitStaged,
+  cloneRepo,
 } from '../src/git';
 
 interface FolderState extends FolderConfig {
@@ -36,6 +37,7 @@ const folders: FolderState[] = config.folders.map((f) => ({ ...f, sessions: [], 
 let autoResumeEnabled = config.autoResume !== false;
 
 let win: BrowserWindow | null = null;
+let activeClone: { cancel: () => void } | null = null;
 
 function persist(): void {
   saveConfig({
@@ -344,6 +346,32 @@ ipcMain.handle('app:create-folder', (_e, args: { parentPath: string; name: strin
   }
   registerFolder(name, resolved);
   return { ok: true, state: getState() };
+});
+
+ipcMain.handle('app:clone-repo', async (_e, args: { parentPath: string; name: string; url: string }) => {
+  const name = args.name.trim();
+  const url = args.url.trim();
+  if (!url) return { ok: false, error: 'Repository URL is required.' };
+  if (!name) return { ok: false, error: 'Folder name is required.' };
+  const resolved = path.resolve(args.parentPath, name);
+  if (fs.existsSync(resolved)) {
+    return { ok: false, error: `Already exists: ${resolved}` };
+  }
+
+  const { promise, cancel } = cloneRepo(args.parentPath, url, name, (chunk) => {
+    win?.webContents.send('git:clone-progress', { chunk });
+  });
+  activeClone = { cancel };
+  const result = await promise;
+  activeClone = null;
+  if (!result.ok) return { ok: false, error: result.error };
+
+  registerFolder(name, resolved);
+  return { ok: true, state: getState() };
+});
+
+ipcMain.on('app:clone-repo-cancel', () => {
+  activeClone?.cancel();
 });
 
 ipcMain.handle('app:remove-folder', (_e, args: { folderId: string }) => {

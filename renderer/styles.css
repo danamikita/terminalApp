@@ -944,6 +944,123 @@ html, body {
   filter: brightness(1.15);
 }
 
+#clone-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#clone-overlay.hidden {
+  display: none;
+}
+
+#clone-modal {
+  background: #2d2d30;
+  border: 1px solid #444;
+  border-radius: 6px;
+  padding: 18px;
+  width: 440px;
+  display: flex;
+  flex-direction: column;
+}
+
+#clone-title-bar {
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: #eee;
+}
+
+#clone-url,
+#clone-dest,
+#clone-name {
+  width: 100%;
+  padding: 6px 8px;
+  background: #1e1e1e;
+  border: 1px solid #444;
+  color: #fff;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+#clone-dest-row {
+  display: flex;
+  gap: 8px;
+}
+
+#clone-dest-row #clone-dest {
+  flex: 1;
+  color: #aaa;
+}
+
+#clone-dest-row button {
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  background: #3a3d3e;
+  color: #ddd;
+  white-space: nowrap;
+}
+
+#clone-dest-row button:hover {
+  filter: brightness(1.15);
+}
+
+#clone-log {
+  display: block;
+  margin-top: 12px;
+  max-height: 180px;
+  overflow-y: auto;
+  background: #1e1e1e;
+  border: 1px solid #444;
+  border-radius: 4px;
+  padding: 8px;
+  color: #ccc;
+  font-size: 11px;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+#clone-log.hidden {
+  display: none;
+}
+
+#clone-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+#clone-buttons button {
+  padding: 6px 14px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  background: #3a3d3e;
+  color: #ddd;
+}
+
+#clone-buttons #clone-submit {
+  background: #0e639c;
+  color: #fff;
+}
+
+#clone-buttons #clone-submit:disabled {
+  background: #555;
+  color: #999;
+  cursor: not-allowed;
+}
+
+#clone-buttons button:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
 #commit-overlay {
   position: fixed;
   inset: 0;
