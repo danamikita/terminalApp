@@ -1,4 +1,4 @@
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { BranchInfo, GitChange, GitFileStatusCode, GitInfo, GitOpResult, GitStatusResult } from './types';
 
 function run(args: string[], cwd: string): Promise<string> {
@@ -142,6 +142,46 @@ export async function commitStaged(dirPath: string, message: string): Promise<Gi
   const res = await runAllowFail(['commit', '-m', trimmedMsg], dirPath);
   if (res.code === 0) return { ok: true, message: res.stdout.trim() || undefined };
   return { ok: false, error: (res.stderr || res.stdout || 'Commit failed.').trim() };
+}
+
+export interface CloneHandle {
+  promise: Promise<GitOpResult>;
+  cancel: () => void;
+}
+
+export function cloneRepo(parentDir: string, url: string, name: string, onProgress: (chunk: string) => void): CloneHandle {
+  let cancelled = false;
+  const proc = spawn('git', ['clone', '--progress', '--', url, name], { cwd: parentDir });
+
+  const promise = new Promise<GitOpResult>((resolve) => {
+    let stderr = '';
+    proc.stdout?.on('data', (d) => onProgress(d.toString()));
+    proc.stderr?.on('data', (d) => {
+      const s = d.toString();
+      stderr += s;
+      onProgress(s);
+    });
+    proc.on('error', (err) => {
+      resolve({ ok: false, error: err.message });
+    });
+    proc.on('close', (code) => {
+      if (cancelled) {
+        resolve({ ok: false, error: 'Clone cancelled.' });
+      } else if (code === 0) {
+        resolve({ ok: true });
+      } else {
+        resolve({ ok: false, error: stderr.trim() || `git clone exited with code ${code}` });
+      }
+    });
+  });
+
+  return {
+    promise,
+    cancel: () => {
+      cancelled = true;
+      proc.kill();
+    },
+  };
 }
 
 function mapStatusChar(c: string): GitFileStatusCode | null {

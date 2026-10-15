@@ -16,6 +16,7 @@
           <button id="sidebar-collapse-btn" title="Collapse sidebar">«</button>
           <button id="new-folder-btn" title="Create new folder">🆕</button>
           <button id="add-folder-btn" title="Add existing folder">+</button>
+          <button id="clone-repo-btn" title="Clone a repository">⬇</button>
         </div>
       </div>
       <div id="folder-list"></div>
@@ -78,6 +79,31 @@
       <div id="feedback-buttons">
         <button id="feedback-cancel">Cancel</button>
         <button id="feedback-submit">Open on GitHub</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="clone-overlay" class="hidden">
+    <div id="clone-modal">
+      <div id="clone-title-bar">Clone repository</div>
+
+      <label class="feedback-label" for="clone-url">Repository URL</label>
+      <input id="clone-url" type="text" placeholder="https://github.com/user/repo.git" />
+
+      <label class="feedback-label" for="clone-dest">Clone into</label>
+      <div id="clone-dest-row">
+        <input id="clone-dest" type="text" readonly placeholder="Choose a parent folder..." />
+        <button id="clone-browse-btn">Browse…</button>
+      </div>
+
+      <label class="feedback-label" for="clone-name">Folder name</label>
+      <input id="clone-name" type="text" />
+
+      <pre id="clone-log" class="hidden"></pre>
+
+      <div id="clone-buttons">
+        <button id="clone-cancel">Cancel</button>
+        <button id="clone-submit">Clone</button>
       </div>
     </div>
   </div>
