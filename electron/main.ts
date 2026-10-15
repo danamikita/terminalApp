@@ -26,15 +26,19 @@ interface FolderState extends FolderConfig {
   expanded: boolean;
 }
 
+const isTestMode = process.env.TERMINALAPP_TEST === '1';
 if (!app.isPackaged) {
   // Keep a dev run's userData (incl. the single-instance lock) and saved
   // config separate from the installed app so both can run at once.
-  app.setName('terminalapp-dev');
-  setConfigDirName('.terminalapp-dev');
+  // Automated-driver runs (TERMINALAPP_TEST=1) get their own config dir too,
+  // so they never collide with a manually-run dev instance.
+  app.setName(isTestMode ? 'terminalapp-test' : 'terminalapp-dev');
+  setConfigDirName(isTestMode ? '.terminalapp-test' : '.terminalapp-dev');
 }
 const config = loadConfig();
 const folders: FolderState[] = config.folders.map((f) => ({ ...f, sessions: [], expanded: true }));
-let autoResumeEnabled = config.autoResume !== false;
+// Test-mode never auto-resumes real sessions, even if a prior test run saved some.
+let autoResumeEnabled = isTestMode ? false : config.autoResume !== false;
 
 let win: BrowserWindow | null = null;
 let activeClone: { cancel: () => void } | null = null;
@@ -100,6 +104,7 @@ function createSessionForFolder(folder: FolderState, command: string, shell?: Sh
   };
   session.onExit = () => pushState();
   session.onLastCommandChange = () => pushState();
+  session.onActivityChange = () => pushState();
   folder.sessions.push(session);
   return session;
 }
@@ -143,6 +148,8 @@ function getState(): AppState {
         lastCommand: s.lastCommand,
         status: s.status,
         exitCode: s.exitCode,
+        activity: s.activity,
+        attention: s.attention,
       })),
     })),
   };
@@ -410,6 +417,11 @@ ipcMain.handle('app:set-auto-resume', (_e, args: { enabled: boolean }) => {
   return { ok: true, state: getState() };
 });
 
+ipcMain.handle('app:focus-session', (_e, args: { sessionId: string }) => {
+  findSession(args.sessionId)?.focus();
+  return { ok: true, state: getState() };
+});
+
 ipcMain.handle('app:kill-session', (_e, args: { sessionId: string }) => {
   const session = findSession(args.sessionId);
   session?.kill();
@@ -511,4 +523,36 @@ ipcMain.handle('app:get-info', () => ({
 ipcMain.handle('app:open-external-url', (_e, args: { url: string }) => {
   shell.openExternal(args.url);
   return { ok: true };
+});
+
+ipcMain.handle('app:check-for-updates', async () => {
+  if (!app.isPackaged) {
+    return { status: 'dev' as const };
+  }
+  return new Promise<{ status: string; version?: string; message?: string; currentVersion?: string }>((resolve) => {
+    const cleanup = () => {
+      autoUpdater.removeListener('update-available', onAvailable);
+      autoUpdater.removeListener('update-not-available', onNotAvailable);
+      autoUpdater.removeListener('error', onError);
+    };
+    const onAvailable = (info: { version: string }) => {
+      cleanup();
+      resolve({ status: 'available', version: info.version });
+    };
+    const onNotAvailable = () => {
+      cleanup();
+      resolve({ status: 'not-available', currentVersion: app.getVersion() });
+    };
+    const onError = (err: Error) => {
+      cleanup();
+      resolve({ status: 'error', message: err.message });
+    };
+    autoUpdater.once('update-available', onAvailable);
+    autoUpdater.once('update-not-available', onNotAvailable);
+    autoUpdater.once('error', onError);
+    autoUpdater.checkForUpdates().catch((err: Error) => {
+      cleanup();
+      resolve({ status: 'error', message: err.message });
+    });
+  });
 });

@@ -37,6 +37,7 @@ const editorPaneEl = document.getElementById('editor-pane');
 const gitPanelEl = document.getElementById('git-panel');
 const splitToggleBtn = document.getElementById('split-toggle');
 const autoResumeToggleBtn = document.getElementById('auto-resume-toggle');
+const checkUpdateBtn = document.getElementById('check-update-btn');
 
 const overlay = document.getElementById('modal-overlay');
 const modalLabel = document.getElementById('modal-label');
@@ -191,6 +192,18 @@ function handleSlnClick(folder, anchorEl) {
   );
 }
 
+function sessionDotClass(session) {
+  if (session.status === 'exited') return 'exited';
+  if (session.attention) return 'running attention';
+  return session.activity === 'busy' ? 'running busy' : 'running idle';
+}
+
+function sessionDotTitle(session) {
+  if (session.status === 'exited') return 'Exited';
+  if (session.attention) return 'Waiting for you — ready for input';
+  return session.activity === 'busy' ? 'Running' : 'Idle';
+}
+
 function renderSidebar() {
   folderListEl.innerHTML = '';
 
@@ -202,6 +215,8 @@ function renderSidebar() {
   for (const folder of state.folders) {
     const isCollapsed = collapsed.has(folder.id);
     const row = el('div', 'folder-row');
+    row.dataset.testid = 'folder-row';
+    row.dataset.folderId = folder.id;
     const main = el('div', 'folder-main');
     main.appendChild(el('span', 'folder-arrow', isCollapsed ? '▸' : '▾'));
     main.appendChild(el('span', 'folder-icon', '📦'));
@@ -221,6 +236,7 @@ function renderSidebar() {
 
     const newBtn = el('button', 'row-btn', '+');
     newBtn.title = 'New session';
+    newBtn.dataset.testid = 'new-session-btn';
     newBtn.addEventListener('click', (ev) => {
       ev.stopPropagation();
       promptNewSession(folder);
@@ -228,6 +244,7 @@ function renderSidebar() {
     main.appendChild(newBtn);
 
     const trashBtn = el('button', 'row-btn', '✕');
+    trashBtn.dataset.testid = 'remove-folder-btn';
     trashBtn.title = 'Remove folder';
     trashBtn.addEventListener('click', (ev) => {
       ev.stopPropagation();
@@ -238,9 +255,15 @@ function renderSidebar() {
 
     const gitBadge = buildGitBadge(folder);
     const runningCount = folder.sessions.filter((s) => s.status === 'running').length;
+    const attentionCount = folder.sessions.filter((s) => s.attention).length;
     if (gitBadge || runningCount > 0) {
       const meta = el('div', 'folder-meta');
       if (gitBadge) meta.appendChild(gitBadge);
+      if (attentionCount > 0) {
+        const attn = el('span', 'folder-attention', '●');
+        attn.title = `${attentionCount} session${attentionCount === 1 ? '' : 's'} waiting for you`;
+        meta.appendChild(attn);
+      }
       if (runningCount > 0) meta.appendChild(el('span', 'folder-count', `(${runningCount})`));
       row.appendChild(meta);
     }
@@ -254,6 +277,8 @@ function renderSidebar() {
 
     if (!isCollapsed) {
       const filesRow = el('div', 'session-row');
+      filesRow.dataset.testid = 'files-row';
+      filesRow.dataset.folderId = folder.id;
       if (filesPanelState && filesPanelState.folderId === folder.id && (splitMode || singleModeShowing === 'files')) {
         filesRow.classList.add('selected');
       }
@@ -265,6 +290,8 @@ function renderSidebar() {
       const info = gitInfo.get(folder.id);
       if (info && info.isRepo) {
         const gitRow = el('div', 'session-row');
+        gitRow.dataset.testid = 'git-row';
+        gitRow.dataset.folderId = folder.id;
         if (filesPanelState && filesPanelState.folderId === folder.id && filesPanelState.view === 'git' && (splitMode || singleModeShowing === 'files')) {
           gitRow.classList.add('selected');
         }
@@ -276,11 +303,18 @@ function renderSidebar() {
 
       for (const session of folder.sessions) {
         const sRow = el('div', 'session-row');
+        sRow.dataset.testid = 'session-row';
+        sRow.dataset.sessionId = session.id;
+        sRow.dataset.status = session.status;
+        sRow.dataset.activity = session.activity;
+        sRow.dataset.attention = String(!!session.attention);
         if (session.id === activeSessionId && (splitMode || singleModeShowing === 'session')) {
           sRow.classList.add('selected');
         }
 
-        const dot = el('span', `status-dot ${session.status}`, '●');
+        const dot = el('span', `status-dot ${sessionDotClass(session)}`, '●');
+        dot.dataset.testid = 'status-dot';
+        dot.title = sessionDotTitle(session);
         sRow.appendChild(dot);
 
         const info = el('div', 'session-info');
@@ -294,6 +328,7 @@ function renderSidebar() {
         sRow.appendChild(info);
 
         const renameBtn = el('button', 'row-btn', '✎');
+        renameBtn.dataset.testid = 'rename-session-btn';
         renameBtn.title = 'Rename session';
         renameBtn.addEventListener('click', (ev) => {
           ev.stopPropagation();
@@ -302,6 +337,7 @@ function renderSidebar() {
         sRow.appendChild(renameBtn);
 
         const killBtn = el('button', 'row-btn', '✕');
+        killBtn.dataset.testid = 'kill-session-btn';
         killBtn.title = 'Kill session';
         killBtn.addEventListener('click', (ev) => {
           ev.stopPropagation();
@@ -405,6 +441,10 @@ function selectSession(sessionId) {
   ensureTerminalForSession(sessionId);
   applyLayout();
   renderSidebar();
+  ipcRenderer.invoke('app:focus-session', { sessionId }).then((res) => {
+    state = res.state;
+    renderSidebar();
+  });
 }
 
 function openFilesForFolder(folder) {
@@ -768,6 +808,26 @@ autoResumeToggleBtn.addEventListener('click', async () => {
   state = res.state;
   applyAutoResumeButton();
   renderSidebar();
+});
+
+checkUpdateBtn.addEventListener('click', async () => {
+  checkUpdateBtn.disabled = true;
+  checkUpdateBtn.textContent = '🔄 Checking…';
+  try {
+    const res = await ipcRenderer.invoke('app:check-for-updates');
+    if (res.status === 'dev') {
+      alert('Update checks only work in the installed app, not in a dev build.');
+    } else if (res.status === 'available') {
+      alert(`Update found: v${res.version}. Downloading now — you'll be prompted to restart once it's ready.`);
+    } else if (res.status === 'not-available') {
+      alert(`You're up to date (v${res.currentVersion}).`);
+    } else {
+      alert(`Update check failed: ${res.message}`);
+    }
+  } finally {
+    checkUpdateBtn.disabled = false;
+    checkUpdateBtn.textContent = '🔄 Check for Updates';
+  }
 });
 
 function buildIssueUrl(type, title, body, info) {

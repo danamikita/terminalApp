@@ -6,6 +6,15 @@ import * as path from 'path';
 import { ShellType } from './types';
 
 export type SessionStatus = 'running' | 'exited';
+export type SessionActivity = 'idle' | 'busy';
+
+const IDLE_AFTER_MS = 800;
+const BEL = '\x07';
+// OSC (Operating System Command) sequences are sometimes terminated with BEL
+// instead of the proper ST (ESC \) — shells commonly use this to set the
+// window/tab title (e.g. cmd.exe does it on every prompt). That's not a real
+// bell, so strip such sequences before looking for a standalone BEL.
+const OSC_BEL_TERMINATED = /\x1b\][^\x07\x1b]*\x07/g;
 
 export interface SessionOptions {
   folderId: string;
@@ -52,6 +61,8 @@ export class PtySession {
   status: SessionStatus = 'running';
   exitCode: number | undefined;
   lastCommand: string | undefined;
+  activity: SessionActivity = 'idle';
+  attention = false;
 
   private proc: pty.IPty;
   private cols: number;
@@ -60,10 +71,12 @@ export class PtySession {
   private buffer: string[] = [];
   private bufferBytes = 0;
   private readonly maxBufferBytes = 200_000;
+  private idleTimer: ReturnType<typeof setTimeout> | undefined;
 
   onData?: (data: string) => void;
   onExit?: () => void;
   onLastCommandChange?: () => void;
+  onActivityChange?: () => void;
 
   constructor(opts: SessionOptions) {
     this.folderId = opts.folderId;
@@ -89,14 +102,37 @@ export class PtySession {
 
     this.proc.onData((data) => {
       this.pushBuffer(data);
+      this.markBusy();
+      if (!this.attention && data.replace(OSC_BEL_TERMINATED, '').includes(BEL)) {
+        this.attention = true;
+        this.onActivityChange?.();
+      }
       this.onData?.(data);
     });
 
     this.proc.onExit(({ exitCode }) => {
       this.status = 'exited';
       this.exitCode = exitCode;
+      clearTimeout(this.idleTimer);
       this.onExit?.();
     });
+  }
+
+  private markBusy(): void {
+    clearTimeout(this.idleTimer);
+    const wasIdle = this.activity === 'idle';
+    this.activity = 'busy';
+    if (wasIdle) this.onActivityChange?.();
+    this.idleTimer = setTimeout(() => {
+      this.activity = 'idle';
+      this.onActivityChange?.();
+    }, IDLE_AFTER_MS);
+  }
+
+  focus(): void {
+    if (!this.attention) return;
+    this.attention = false;
+    this.onActivityChange?.();
   }
 
   getBuffer(): string {
@@ -119,6 +155,7 @@ export class PtySession {
   write(data: string): void {
     if (data && this.status === 'running') this.proc.write(data);
     this.trackInputLine(data);
+    this.focus();
   }
 
   private trackInputLine(data: string): void {
@@ -157,6 +194,7 @@ export class PtySession {
   }
 
   kill(): void {
+    clearTimeout(this.idleTimer);
     if (this.status === 'running') {
       try {
         this.proc.kill();

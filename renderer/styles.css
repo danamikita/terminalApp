@@ -216,7 +216,9 @@ html, body {
 }
 
 .session-row.selected {
-  background: #37373d;
+  background: #0a5a96;
+  border-left: 3px solid #4fa3ff;
+  padding-left: 23px;
 }
 
 .status-dot {
@@ -224,12 +226,33 @@ html, body {
   flex-shrink: 0;
 }
 
-.status-dot.running {
+.status-dot.running.idle {
   color: #3fb950;
+}
+
+.status-dot.running.busy {
+  color: #4fa3ff;
+  animation: status-pulse 1.1s ease-in-out infinite;
+}
+
+.status-dot.running.attention {
+  color: #e3b341;
+  animation: status-pulse 1.1s ease-in-out infinite;
 }
 
 .status-dot.exited {
   color: #6e7681;
+}
+
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.folder-attention {
+  color: #e3b341;
+  font-size: 10px;
+  animation: status-pulse 1.1s ease-in-out infinite;
 }
 
 .session-info {

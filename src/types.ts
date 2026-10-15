@@ -28,6 +28,8 @@ export interface SessionSnapshot {
   lastCommand?: string;
   status: 'running' | 'exited';
   exitCode?: number;
+  activity: 'idle' | 'busy';
+  attention: boolean;
 }
 
 export interface FolderSnapshot {
