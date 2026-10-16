@@ -38,6 +38,7 @@ const gitPanelEl = document.getElementById('git-panel');
 const splitToggleBtn = document.getElementById('split-toggle');
 const autoResumeToggleBtn = document.getElementById('auto-resume-toggle');
 const checkUpdateBtn = document.getElementById('check-update-btn');
+const webDriverToggleBtn = document.getElementById('web-driver-toggle');
 
 const overlay = document.getElementById('modal-overlay');
 const modalLabel = document.getElementById('modal-label');
@@ -852,6 +853,25 @@ autoResumeToggleBtn.addEventListener('click', async () => {
   state = res.state;
   applyAutoResumeButton();
   renderSidebar();
+});
+
+let webDriverEnabled = false;
+
+webDriverToggleBtn.addEventListener('click', async () => {
+  const res = await ipcRenderer.invoke('app:toggle-web-driver', { enabled: !webDriverEnabled });
+  if (!res.ok) {
+    alert(`Could not start web driver: ${res.error}`);
+    return;
+  }
+  webDriverEnabled = res.enabled;
+  webDriverToggleBtn.classList.toggle('active', webDriverEnabled);
+  if (webDriverEnabled) {
+    alert(
+      `Web driver listening on http://127.0.0.1:${res.port}/?token=${res.token}\n\n` +
+        `Open that URL for a small control page, or POST to /cmd with header X-Driver-Token: ${res.token}\n\n` +
+        `Anyone who gets this token can control the app and run arbitrary code in it — turn it off when you're done.`
+    );
+  }
 });
 
 checkUpdateBtn.addEventListener('click', async () => {

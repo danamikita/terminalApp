@@ -20,6 +20,7 @@ import {
   commitStaged,
   cloneRepo,
 } from '../src/git';
+import { startWebDriver, WebDriverHandle } from './web-driver';
 
 interface FolderState extends FolderConfig {
   sessions: PtySession[];
@@ -42,6 +43,8 @@ let autoResumeEnabled = isTestMode ? false : config.autoResume !== false;
 
 let win: BrowserWindow | null = null;
 let activeClone: { cancel: () => void } | null = null;
+let webDriver: WebDriverHandle | null = null;
+const WEB_DRIVER_PORT = Number(process.env.TERMINALAPP_WEBDRIVER_PORT) || 47832;
 
 function sendToWindow(channel: string, payload: unknown): void {
   if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
@@ -324,6 +327,10 @@ app.on('window-all-closed', () => {
   app.quit();
 });
 
+app.on('before-quit', () => {
+  webDriver?.stop();
+});
+
 ipcMain.handle('app:get-state', () => getState());
 
 ipcMain.handle('app:pick-directory', async (_e, args?: { title?: string }) => {
@@ -553,6 +560,23 @@ ipcMain.handle('app:get-info', () => ({
 ipcMain.handle('app:open-external-url', (_e, args: { url: string }) => {
   shell.openExternal(args.url);
   return { ok: true };
+});
+
+ipcMain.handle('app:toggle-web-driver', async (_e, args: { enabled: boolean }) => {
+  if (!args.enabled) {
+    if (webDriver) {
+      await webDriver.stop();
+      webDriver = null;
+    }
+    return { ok: true, enabled: false };
+  }
+  if (webDriver) return { ok: true, enabled: true, port: webDriver.port, token: webDriver.token };
+  try {
+    webDriver = await startWebDriver(() => win, WEB_DRIVER_PORT);
+    return { ok: true, enabled: true, port: webDriver.port, token: webDriver.token };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
 });
 
 ipcMain.handle('app:check-for-updates', async () => {
