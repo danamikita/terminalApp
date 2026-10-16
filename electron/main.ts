@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, Menu } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -415,6 +415,26 @@ ipcMain.handle('app:create-session', (_e, args: { folderId: string; command: str
   if ('error' in result) return { ok: false, error: result.error, state: getState() };
 
   return { ok: true, state: getState(), sessionId: result.id };
+});
+
+ipcMain.handle('app:popup-menu', (_e, args: { items: { id: string; label: string }[] }) => {
+  return new Promise<string | null>((resolve) => {
+    let resolved = false;
+    const template = args.items.map((item) => ({
+      label: item.label,
+      click: () => {
+        resolved = true;
+        resolve(item.id);
+      },
+    }));
+    const menu = Menu.buildFromTemplate(template);
+    menu.popup({
+      window: win ?? undefined,
+      callback: () => {
+        if (!resolved) resolve(null);
+      },
+    });
+  });
 });
 
 ipcMain.handle('app:get-session-buffer', (_e, args: { sessionId: string }) => ({

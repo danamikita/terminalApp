@@ -466,6 +466,40 @@ function showFilesListing(folder, dirPath) {
 
 const BINARY_EXT = /\.(png|jpe?g|gif|bmp|ico|webp|pdf|zip|7z|rar|exe|dll|so|dylib|mp3|mp4|mov|wav|ttf|woff2?|bin)$/i;
 
+// ext -> how to run it: build(path) produces the command line to type into
+// the session; shell pins the shell type it needs (omitted = folder's usual shell).
+const SCRIPT_RUNNERS = {
+  '.ps1': { shell: 'powershell', build: (p) => `& "${p}"` },
+  '.bat': { shell: 'cmd', build: (p) => `"${p}"` },
+  '.cmd': { shell: 'cmd', build: (p) => `"${p}"` },
+  '.sh': { shell: 'bash', build: (p) => `"${p}"` },
+  '.py': { build: (p) => `python "${p}"` },
+  '.js': { build: (p) => `node "${p}"` },
+  '.mjs': { build: (p) => `node "${p}"` },
+  '.cjs': { build: (p) => `node "${p}"` },
+  '.rb': { build: (p) => `ruby "${p}"` },
+  '.pl': { build: (p) => `perl "${p}"` },
+};
+
+async function runScriptInNewSession(folder, filePath, runner) {
+  const choice = await ipcRenderer.invoke('app:popup-menu', {
+    items: [{ id: 'run', label: 'Run in New Session' }],
+  });
+  if (choice !== 'run') return;
+
+  const command = runner.build(filePath);
+  const shell = runner.shell || folder.lastShell;
+  const res = await ipcRenderer.invoke('app:create-session', { folderId: folder.id, command, shell });
+  state = res.state;
+  if (!res.ok) {
+    alert(res.error);
+    renderSidebar();
+    return;
+  }
+  collapsed.delete(folder.id);
+  selectSession(res.sessionId);
+}
+
 async function renderFileBrowserContents(folder, dirPath) {
   fileBrowserEl.innerHTML = '';
   fileBrowserEl.appendChild(el('div', 'fb-breadcrumb', dirPath));
@@ -497,6 +531,7 @@ async function renderFileBrowserContents(folder, dirPath) {
     } else {
       const isMd = /\.(md|markdown)$/i.test(entry.name);
       const isBinary = BINARY_EXT.test(entry.name);
+      const runner = SCRIPT_RUNNERS[path.extname(entry.name).toLowerCase()];
       row.appendChild(el('span', 'fb-icon', isMd ? '📝' : '📄'));
       row.appendChild(el('span', 'fb-name', entry.name));
       row.addEventListener('click', () => {
@@ -504,6 +539,12 @@ async function renderFileBrowserContents(folder, dirPath) {
         else if (isBinary) ipcRenderer.invoke('fs:open-external', { filePath: full });
         else openFileInEditor(folder, full, false);
       });
+      if (runner) {
+        row.addEventListener('contextmenu', (ev) => {
+          ev.preventDefault();
+          runScriptInNewSession(folder, full, runner);
+        });
+      }
     }
     fileBrowserEl.appendChild(row);
   }
