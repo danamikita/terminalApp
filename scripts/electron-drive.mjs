@@ -76,6 +76,24 @@ async function run(line) {
       console.log('click', arg, '->', ok ? 'ok' : 'NOT_FOUND');
       break;
     }
+    case 'mouseclick': {
+      // Real OS-level mouse click at an element's center, with genuine
+      // clientX/clientY — unlike `click` (a synthetic .click()), this is
+      // what xterm.js's own mousedown/mouseup listeners need to fire.
+      const box = await page.evaluate((sel) => {
+        const el = document.querySelector(sel);
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      }, arg);
+      if (!box) {
+        console.log('mouseclick', arg, '-> NOT_FOUND');
+      } else {
+        await page.mouse.click(box.x, box.y);
+        console.log('mouseclick', arg, '->', JSON.stringify(box));
+      }
+      break;
+    }
     case 'type':
       await page.keyboard.type(arg, { delay: 20 });
       console.log('typed:', arg);

@@ -421,6 +421,9 @@ function ensureTerminalForSession(sessionId) {
   term.onData((data) => {
     ipcRenderer.send('session:write', { sessionId, data });
   });
+  term.onBinary((data) => {
+    ipcRenderer.send('session:write', { sessionId, data });
+  });
 
   const entry = { term, fitAddon, container, ready: false, pending: [] };
   sessionTerms.set(sessionId, entry);
