@@ -43,6 +43,12 @@ let autoResumeEnabled = isTestMode ? false : config.autoResume !== false;
 let win: BrowserWindow | null = null;
 let activeClone: { cancel: () => void } | null = null;
 
+function sendToWindow(channel: string, payload: unknown): void {
+  if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
+    win.webContents.send(channel, payload);
+  }
+}
+
 function persist(): void {
   saveConfig({
     folders: folders.map(({ sessions, expanded, ...f }) => f),
@@ -100,7 +106,7 @@ function createSessionForFolder(folder: FolderState, command: string, shell?: Sh
   }
 
   session.onData = (data) => {
-    win?.webContents.send('session:data', { sessionId: session.id, data });
+    sendToWindow('session:data', { sessionId: session.id, data });
   };
   session.onExit = () => pushState();
   session.onLastCommandChange = () => pushState();
@@ -156,7 +162,7 @@ function getState(): AppState {
 }
 
 function pushState(): void {
-  win?.webContents.send('app:state', getState());
+  sendToWindow('app:state', getState());
 }
 
 function createWindow(): void {
@@ -231,6 +237,10 @@ function createWindow(): void {
     for (const folder of folders) {
       for (const session of folder.sessions) session.kill();
     }
+  });
+
+  win.on('closed', () => {
+    win = null;
   });
 }
 
@@ -368,7 +378,7 @@ ipcMain.handle('app:clone-repo', async (_e, args: { parentPath: string; name: st
   }
 
   const { promise, cancel } = cloneRepo(args.parentPath, url, name, (chunk) => {
-    win?.webContents.send('git:clone-progress', { chunk });
+    sendToWindow('git:clone-progress', { chunk });
   });
   activeClone = { cancel };
   const result = await promise;
