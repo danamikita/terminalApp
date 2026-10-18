@@ -22,6 +22,10 @@
       <div id="folder-list"></div>
     </div>
     <div id="main">
+      <div id="web-driver-banner" class="hidden">
+        <span>⚠️ Web Driver is on — this app is reachable from any device on this network until you turn it off.</span>
+        <button id="web-driver-banner-off">Turn off</button>
+      </div>
       <div id="main-toolbar">
         <button id="feedback-btn" class="toolbar-btn" title="Report a problem or suggest something">🐛 Feedback</button>
         <button id="auto-resume-toggle" class="toolbar-btn" title="Relaunch sessions that were running when the app last closed (claude sessions resume with --continue)">🔁 Auto-resume</button>
@@ -140,6 +144,23 @@
       <div id="commit-buttons">
         <button id="commit-cancel">Cancel</button>
         <button id="commit-submit">Commit</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="web-driver-overlay" class="hidden">
+    <div id="web-driver-modal">
+      <div id="web-driver-title-bar">Web Driver enabled</div>
+      <p class="feedback-note">
+        Listening on your local network — reachable from any device on the same Wi-Fi (e.g. your phone), gated by the
+        token in the link below. Anyone with this link can control the app and run arbitrary code in it — turn it off
+        when you're done.
+      </p>
+      <label class="feedback-label" for="web-driver-url">Driver URL</label>
+      <input id="web-driver-url" type="text" readonly />
+      <div id="web-driver-buttons">
+        <button id="web-driver-copy">📋 Copy to clipboard</button>
+        <button id="web-driver-close">Close</button>
       </div>
     </div>
   </div>

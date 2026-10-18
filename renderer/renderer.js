@@ -1,4 +1,4 @@
-const { ipcRenderer, clipboard } = require('electron');
+const { ipcRenderer } = require('electron');
 const path = require('path');
 const { Terminal } = require('@xterm/xterm');
 const { FitAddon } = require('@xterm/addon-fit');
@@ -39,6 +39,12 @@ const splitToggleBtn = document.getElementById('split-toggle');
 const autoResumeToggleBtn = document.getElementById('auto-resume-toggle');
 const checkUpdateBtn = document.getElementById('check-update-btn');
 const webDriverToggleBtn = document.getElementById('web-driver-toggle');
+const webDriverOverlay = document.getElementById('web-driver-overlay');
+const webDriverUrlInput = document.getElementById('web-driver-url');
+const webDriverCopyBtn = document.getElementById('web-driver-copy');
+const webDriverCloseBtn = document.getElementById('web-driver-close');
+const webDriverBanner = document.getElementById('web-driver-banner');
+const webDriverBannerOffBtn = document.getElementById('web-driver-banner-off');
 
 const overlay = document.getElementById('modal-overlay');
 const modalLabel = document.getElementById('modal-label');
@@ -408,12 +414,13 @@ function ensureTerminalForSession(sessionId) {
     if (ev.type !== 'keydown' || !ev.ctrlKey || ev.altKey || ev.metaKey) return true;
     const key = ev.key.toLowerCase();
     if (key === 'c' && term.hasSelection()) {
-      clipboard.writeText(term.getSelection());
+      navigator.clipboard.writeText(term.getSelection());
       return false;
     }
     if (key === 'v') {
-      const text = clipboard.readText();
-      if (text) ipcRenderer.send('session:write', { sessionId, data: text });
+      navigator.clipboard.readText().then((text) => {
+        if (text) ipcRenderer.send('session:write', { sessionId, data: text });
+      });
       return false;
     }
     return true;
@@ -857,21 +864,36 @@ autoResumeToggleBtn.addEventListener('click', async () => {
 
 let webDriverEnabled = false;
 
-webDriverToggleBtn.addEventListener('click', async () => {
-  const res = await ipcRenderer.invoke('app:toggle-web-driver', { enabled: !webDriverEnabled });
+async function setWebDriverEnabled(enabled) {
+  const res = await ipcRenderer.invoke('app:toggle-web-driver', { enabled });
   if (!res.ok) {
     alert(`Could not start web driver: ${res.error}`);
     return;
   }
   webDriverEnabled = res.enabled;
   webDriverToggleBtn.classList.toggle('active', webDriverEnabled);
+  webDriverBanner.classList.toggle('hidden', !webDriverEnabled);
   if (webDriverEnabled) {
-    alert(
-      `Web driver listening on http://127.0.0.1:${res.port}/?token=${res.token}\n\n` +
-        `Open that URL for a small control page, or POST to /cmd with header X-Driver-Token: ${res.token}\n\n` +
-        `Anyone who gets this token can control the app and run arbitrary code in it — turn it off when you're done.`
-    );
+    const host = res.lanAddress || '127.0.0.1';
+    webDriverUrlInput.value = `http://${host}:${res.port}/?token=${res.token}`;
+    webDriverCopyBtn.textContent = '📋 Copy to clipboard';
+    webDriverOverlay.classList.remove('hidden');
   }
+}
+
+webDriverToggleBtn.addEventListener('click', () => setWebDriverEnabled(!webDriverEnabled));
+webDriverBannerOffBtn.addEventListener('click', () => setWebDriverEnabled(false));
+
+webDriverCopyBtn.addEventListener('click', () => {
+  navigator.clipboard.writeText(webDriverUrlInput.value);
+  webDriverCopyBtn.textContent = '✓ Copied';
+  setTimeout(() => {
+    webDriverCopyBtn.textContent = '📋 Copy to clipboard';
+  }, 1500);
+});
+
+webDriverCloseBtn.addEventListener('click', () => {
+  webDriverOverlay.classList.add('hidden');
 });
 
 checkUpdateBtn.addEventListener('click', async () => {

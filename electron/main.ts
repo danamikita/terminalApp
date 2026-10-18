@@ -20,7 +20,7 @@ import {
   commitStaged,
   cloneRepo,
 } from '../src/git';
-import { startWebDriver, WebDriverHandle } from './web-driver';
+import { startWebDriver, getLanAddress, WebDriverHandle } from './web-driver';
 
 interface FolderState extends FolderConfig {
   sessions: PtySession[];
@@ -570,10 +570,12 @@ ipcMain.handle('app:toggle-web-driver', async (_e, args: { enabled: boolean }) =
     }
     return { ok: true, enabled: false };
   }
-  if (webDriver) return { ok: true, enabled: true, port: webDriver.port, token: webDriver.token };
+  if (webDriver) {
+    return { ok: true, enabled: true, port: webDriver.port, token: webDriver.token, lanAddress: getLanAddress() };
+  }
   try {
     webDriver = await startWebDriver(() => win, WEB_DRIVER_PORT);
-    return { ok: true, enabled: true, port: webDriver.port, token: webDriver.token };
+    return { ok: true, enabled: true, port: webDriver.port, token: webDriver.token, lanAddress: getLanAddress() };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }

@@ -1,21 +1,33 @@
-// An opt-in, localhost-only HTTP driver for the app's own BrowserWindow.
-// Mirrors the command set of scripts/electron-drive.mjs (click/type/press/
-// wait/eval/state/screenshot/sleep) but drives the real running window
-// directly via webContents, instead of relaunching a separate Playwright
-// instance. Never started automatically — see app:toggle-web-driver in
-// main.ts, which is wired to a UI toggle that defaults to off every launch.
+// An opt-in HTTP driver for the app's own BrowserWindow. Mirrors the
+// command set of scripts/electron-drive.mjs (click/type/press/wait/eval/
+// state/screenshot/sleep) but drives the real running window directly via
+// webContents, instead of relaunching a separate Playwright instance.
+// Never started automatically — see app:toggle-web-driver in main.ts,
+// which is wired to a UI toggle that defaults to off every launch.
 //
-// Security: binds to 127.0.0.1 only and requires a random per-session
-// token (shown in the UI when enabled) on every request via the
-// X-Driver-Token header. CORS is left open so a local control page (or
-// a page a human/agent opens to drive the app) can call it cross-origin —
-// the token, not the origin, is what gates access. `eval` runs arbitrary
-// JS in the renderer (which has full Node access), so treat the token
-// like a local root credential for as long as the driver is enabled.
+// Security: listens on all interfaces (0.0.0.0), so it's reachable from
+// any device on the local network (e.g. a phone), not just this machine —
+// that's deliberate, so the link can be opened off-PC. Every request still
+// requires a random per-session token (shown in the UI when enabled, with
+// a copy-to-clipboard button) via the X-Driver-Token header; the token,
+// not the network boundary, is what gates access. `eval` runs arbitrary JS
+// in the renderer (which has full Node access), so treat the token like a
+// root credential for anyone on the LAN for as long as the driver is on.
 import * as http from 'http';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { randomUUID } from 'crypto';
+import * as os from 'os';
 import type { BrowserWindow, KeyboardInputEvent, MouseInputEvent } from 'electron';
+
+export function getLanAddress(): string | null {
+  const nets = os.networkInterfaces();
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name] || []) {
+      if (net.family === 'IPv4' && !net.internal) return net.address;
+    }
+  }
+  return null;
+}
 
 export interface WebDriverHandle {
   port: number;
@@ -250,7 +262,7 @@ export function startWebDriver(getWindow: () => BrowserWindow | null, port: numb
     });
 
     server.once('error', reject);
-    server.listen(port, '127.0.0.1', () => {
+    server.listen(port, '0.0.0.0', () => {
       server.removeListener('error', reject);
       resolve({
         port,

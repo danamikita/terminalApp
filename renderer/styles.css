@@ -316,6 +316,40 @@ html, body {
   min-width: 0;
 }
 
+#web-driver-banner {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  background: #5a3b00;
+  color: #ffd98a;
+  font-size: 12px;
+  border-bottom: 1px solid #7a5200;
+}
+
+#web-driver-banner.hidden {
+  display: none;
+}
+
+#web-driver-banner span {
+  flex: 1;
+}
+
+#web-driver-banner button {
+  background: #7a5200;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 3px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+#web-driver-banner button:hover {
+  filter: brightness(1.15);
+}
+
 #main-toolbar {
   height: 28px;
   flex-shrink: 0;
@@ -1225,5 +1259,70 @@ html, body {
 }
 
 #commit-buttons button:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+#web-driver-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#web-driver-overlay.hidden {
+  display: none;
+}
+
+#web-driver-modal {
+  background: #2d2d30;
+  border: 1px solid #444;
+  border-radius: 6px;
+  padding: 18px;
+  width: 440px;
+  display: flex;
+  flex-direction: column;
+}
+
+#web-driver-title-bar {
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: #eee;
+}
+
+#web-driver-url {
+  width: 100%;
+  padding: 6px 8px;
+  background: #1e1e1e;
+  border: 1px solid #444;
+  color: #fff;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+#web-driver-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+#web-driver-buttons button {
+  padding: 6px 14px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  background: #3a3d3e;
+  color: #ddd;
+}
+
+#web-driver-buttons #web-driver-copy {
+  background: #0e639c;
+  color: #fff;
+}
+
+#web-driver-buttons button:hover {
   filter: brightness(1.15);
 }
