@@ -226,13 +226,15 @@ export function startWebDriver(getWindow: () => BrowserWindow | null, port: numb
         return;
       }
 
-      if (req.method === 'GET' && req.url === '/') {
+      const pathname = (req.url || '').split('?')[0];
+
+      if (req.method === 'GET' && pathname === '/') {
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end(controlPage());
         return;
       }
 
-      if (req.method !== 'POST' || req.url !== '/cmd') {
+      if (req.method !== 'POST' || pathname !== '/cmd') {
         res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: 'not found' }));
         return;
