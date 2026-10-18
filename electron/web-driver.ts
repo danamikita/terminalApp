@@ -19,14 +19,28 @@ import { randomUUID } from 'crypto';
 import * as os from 'os';
 import type { BrowserWindow, KeyboardInputEvent, MouseInputEvent } from 'electron';
 
+// Interface names that are virtual/VPN adapters rather than the NIC a phone
+// on the same Wi-Fi can actually reach — e.g. Tailscale assigns a CGNAT
+// address (100.64.0.0/10) that's only routable to other devices on the same
+// tailnet, and Hyper-V's default switch is NAT-only. Picking "the first
+// non-internal IPv4" blindly tends to grab one of these instead of the real
+// Wi-Fi/Ethernet address, which just times out from another device.
+const VIRTUAL_ADAPTER_NAME = /tailscale|vpn|virtual|vethernet|hyper-v|docker|wsl|zerotier|wireguard|vmware|virtualbox/i;
+const PHYSICAL_ADAPTER_NAME = /^(wi-?fi|ethernet|en\d|eth\d|wlan\d)/i;
+
 export function getLanAddress(): string | null {
   const nets = os.networkInterfaces();
+  const candidates: { name: string; address: string }[] = [];
   for (const name of Object.keys(nets)) {
     for (const net of nets[name] || []) {
-      if (net.family === 'IPv4' && !net.internal) return net.address;
+      if (net.family === 'IPv4' && !net.internal) candidates.push({ name, address: net.address });
     }
   }
-  return null;
+  if (candidates.length === 0) return null;
+
+  const physical = candidates.filter((c) => !VIRTUAL_ADAPTER_NAME.test(c.name));
+  const preferred = physical.find((c) => PHYSICAL_ADAPTER_NAME.test(c.name)) || physical[0];
+  return (preferred || candidates[0]).address;
 }
 
 export interface WebDriverHandle {
