@@ -1,5 +1,6 @@
 const { ipcRenderer } = require('electron');
 const path = require('path');
+const os = require('os');
 const { Terminal } = require('@xterm/xterm');
 const { FitAddon } = require('@xterm/addon-fit');
 const { parse: parseMarkdown } = require('marked');
@@ -401,6 +402,18 @@ function applyLayout() {
   }
 }
 
+// Sessions run over ConPTY (node-pty's default on Windows). Without telling
+// xterm.js that, it falls back to a heuristic for line-wrap detection ("a
+// line is wrapped if it doesn't end in whitespace") that misfires on most
+// real output, corrupting multi-line copy/selection — lines that aren't
+// actually wrapped get joined without a newline. Build number comes from
+// `os.release()` (e.g. "10.0.26200" -> 26200); xterm only trusts ConPTY's
+// own wrap tracking from build 21376 onward.
+function windowsPtyOptions() {
+  const buildNumber = Number(os.release().split('.')[2]);
+  return { backend: 'conpty', buildNumber: Number.isFinite(buildNumber) ? buildNumber : 0 };
+}
+
 function ensureTerminalForSession(sessionId) {
   if (sessionTerms.has(sessionId)) return sessionTerms.get(sessionId);
 
@@ -411,6 +424,7 @@ function ensureTerminalForSession(sessionId) {
     cursorBlink: true,
     fontSize: 14,
     fontFamily: 'Consolas, "Courier New", monospace',
+    windowsPty: windowsPtyOptions(),
     theme: {
       background: '#1e1e1e',
       foreground: '#d4d4d4',
@@ -434,6 +448,24 @@ function ensureTerminalForSession(sessionId) {
       return false;
     }
     return true;
+  });
+
+  // Right-click copy/paste — the convention most Windows terminals (conhost,
+  // Windows Terminal, PuTTY, ConEmu) use: with a selection, right-click
+  // copies it and clears the selection; with no selection, it pastes. There
+  // was no context-menu handling here at all before, so right-click did
+  // nothing, which is easy to mistake for "copy is broken" if that's your
+  // muscle memory instead of Ctrl+C.
+  container.addEventListener('contextmenu', (ev) => {
+    ev.preventDefault();
+    if (term.hasSelection()) {
+      navigator.clipboard.writeText(term.getSelection());
+      term.clearSelection();
+    } else {
+      navigator.clipboard.readText().then((text) => {
+        if (text) ipcRenderer.send('session:write', { sessionId, data: text });
+      });
+    }
   });
 
   term.onData((data) => {

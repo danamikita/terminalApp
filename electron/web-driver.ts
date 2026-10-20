@@ -167,6 +167,7 @@ function controlPage(): string {
   <script src="/vendor/addon-fit.js"></script>
   <script>
     const token = new URLSearchParams(location.search).get('token') || prompt('Driver token:');
+    const windowsBuildNumber = ${JSON.stringify(Number(os.release().split('.')[2]) || 0)};
     const statusEl = document.getElementById('status');
     const foldersEl = document.getElementById('folders');
     const listView = document.getElementById('listView');
@@ -284,6 +285,7 @@ function controlPage(): string {
         cursorBlink: true,
         fontSize: 14,
         fontFamily: 'Consolas, "Courier New", monospace',
+        windowsPty: { backend: 'conpty', buildNumber: windowsBuildNumber },
         theme: { background: '#1e1e1e', foreground: '#d4d4d4' },
       });
       fitAddon = new FitAddon.FitAddon();
