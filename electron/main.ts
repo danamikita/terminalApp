@@ -3,10 +3,11 @@ import { autoUpdater } from 'electron-updater';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import { execFileSync } from 'child_process';
+import { execFileSync, exec } from 'child_process';
 import { loadConfig, saveConfig, makeFolder, setConfigDirName } from '../src/config';
-import { AppState, FolderConfig, FolderSnapshot, ShellType } from '../src/types';
+import { AppState, FolderConfig, FolderSnapshot, IdeRuleConfig, ShellType } from '../src/types';
 import { PtySession } from '../src/pty-session';
+import { findIdeMatches, buildLaunchPlan, defaultIdeRules } from '../src/ide-rules';
 import {
   getGitInfo,
   listBranches,
@@ -40,6 +41,7 @@ const config = loadConfig();
 const folders: FolderState[] = config.folders.map((f) => ({ ...f, sessions: [], expanded: true }));
 // Test-mode never auto-resumes real sessions, even if a prior test run saved some.
 let autoResumeEnabled = isTestMode ? false : config.autoResume !== false;
+let ideRules: IdeRuleConfig[] = config.ideRules && config.ideRules.length > 0 ? config.ideRules : defaultIdeRules();
 
 let win: BrowserWindow | null = null;
 let activeClone: { cancel: () => void } | null = null;
@@ -56,6 +58,7 @@ function persist(): void {
   saveConfig({
     folders: folders.map(({ sessions, expanded, ...f }) => f),
     autoResume: autoResumeEnabled,
+    ideRules,
   });
 }
 
@@ -125,18 +128,6 @@ function resumeSessionsOnStartup(): void {
       const result = createSessionForFolder(folder, buildResumeCommand(entry.command), entry.shell);
       if (!('error' in result)) result.rename(entry.name);
     }
-  }
-}
-
-function findSlnFiles(dirPath: string): { name: string; path: string }[] {
-  try {
-    return fs
-      .readdirSync(dirPath, { withFileTypes: true })
-      .filter((d) => d.isFile() && d.name.toLowerCase().endsWith('.sln'))
-      .map((d) => ({ name: d.name, path: path.join(dirPath, d.name) }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  } catch {
-    return [];
   }
 }
 
@@ -549,7 +540,31 @@ ipcMain.handle('git:diff', async (_e, args: { dirPath: string; relPath: string; 
 
 ipcMain.handle('git:commit', (_e, args: { dirPath: string; message: string }) => commitStaged(args.dirPath, args.message));
 
-ipcMain.handle('app:list-sln', (_e, args: { dirPath: string }) => ({ files: findSlnFiles(args.dirPath) }));
+ipcMain.handle('app:list-ide-matches', (_e, args: { dirPath: string }) => ({
+  matches: findIdeMatches(args.dirPath, ideRules),
+}));
+
+ipcMain.handle('app:launch-ide', (_e, args: { dirPath: string; ruleId: string; fileName: string | null }) => {
+  const rule = ideRules.find((r) => r.id === args.ruleId);
+  if (!rule) return { ok: false, error: 'Rule not found' };
+  const plan = buildLaunchPlan(args.dirPath, rule, args.fileName);
+  if (plan.mode === 'open') {
+    shell.openPath(plan.target);
+  } else {
+    exec(plan.command, { cwd: plan.cwd }, (err) => {
+      if (err) console.log(`[ide-launch] ${rule.label} failed: ${err.message}`);
+    });
+  }
+  return { ok: true };
+});
+
+ipcMain.handle('app:get-ide-rules', () => ({ rules: ideRules }));
+
+ipcMain.handle('app:save-ide-rules', (_e, args: { rules: IdeRuleConfig[] }) => {
+  ideRules = args.rules;
+  persist();
+  return { ok: true, rules: ideRules };
+});
 
 ipcMain.handle('app:get-info', () => ({
   version: app.getVersion(),

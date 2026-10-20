@@ -31,6 +31,7 @@
         <button id="auto-resume-toggle" class="toolbar-btn" title="Relaunch sessions that were running when the app last closed (claude sessions resume with --continue)">🔁 Auto-resume</button>
         <button id="check-update-btn" class="toolbar-btn" title="Check for a new version now">🔄 Check for Updates</button>
         <button id="web-driver-toggle" class="toolbar-btn" title="Expose a local, token-protected HTTP driver for automating this app (off by default, resets off on relaunch)">🧪 Web Driver</button>
+        <button id="settings-btn" class="toolbar-btn" title="Configure IDE launch rules">⚙ Settings</button>
         <button id="split-toggle" class="toolbar-btn" title="Toggle split view">⬓ Split view</button>
       </div>
       <div id="main-body">
@@ -161,6 +162,31 @@
       <div id="web-driver-buttons">
         <button id="web-driver-copy">📋 Copy to clipboard</button>
         <button id="web-driver-close">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="settings-overlay" class="hidden">
+    <div id="settings-modal">
+      <div id="settings-title-bar">IDE launch rules</div>
+      <p class="feedback-note">
+        Each rule matches files/folders in a project and launches a command. Use <code>{file}</code> for the matched
+        file's full path, or <code>{folder}</code> for the project folder's path. A command that's just
+        <code>{file}</code> or <code>{folder}</code> opens that path with its registered app instead of running a
+        command line. "Always offered" rules need no match and are offered for every folder.
+      </p>
+      <div id="settings-rules-header">
+        <span>Label</span>
+        <span>When</span>
+        <span>Match</span>
+        <span>Command</span>
+        <span></span>
+      </div>
+      <div id="settings-rules"></div>
+      <button id="settings-add-rule">+ Add rule</button>
+      <div id="settings-buttons">
+        <button id="settings-cancel">Cancel</button>
+        <button id="settings-save">Save</button>
       </div>
     </div>
   </div>

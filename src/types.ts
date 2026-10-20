@@ -15,9 +15,25 @@ export interface FolderConfig {
   resumeSessions?: ResumableSession[];
 }
 
+export interface IdeRuleConfig {
+  id: string;
+  label: string;
+  // 'glob': matched against filenames in the folder (see `match`, comma-separated
+  // patterns, each a literal name or "*.ext"). 'always': offered for every folder,
+  // no file needed (e.g. a generic "open in VS Code").
+  matchKind: 'glob' | 'always';
+  match: string;
+  // Command line template: {file} is the matched file's full path (only valid
+  // when matchKind is 'glob'), {folder} is the project folder's path. A command
+  // that's *just* "{file}" or "{folder}" opens that path with its registered app
+  // instead of running a command line.
+  command: string;
+}
+
 export interface AppConfig {
   folders: FolderConfig[];
   autoResume?: boolean;
+  ideRules?: IdeRuleConfig[];
 }
 
 export interface SessionSnapshot {

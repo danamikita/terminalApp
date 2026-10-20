@@ -11,7 +11,7 @@ const sessionTerms = new Map(); // sessionId -> { term, fitAddon, container }
 
 const folderBrowseDir = new Map(); // folderId -> last-browsed directory (sticky)
 const gitInfo = new Map(); // folderId -> GitInfo
-const slnFiles = new Map(); // folderId -> [{ name, path }]
+const ideMatches = new Map(); // folderId -> [{ ruleId, label, fileName }]
 let filesPanelState = null; // null | { folderId, view: 'listing'|'markdown', markdownPath?, markdownReturnDir? }
 let activeSessionId = null;
 let singleModeShowing = 'placeholder'; // 'placeholder' | 'files' | 'session' -- which slot wins when not split
@@ -45,6 +45,13 @@ const webDriverCopyBtn = document.getElementById('web-driver-copy');
 const webDriverCloseBtn = document.getElementById('web-driver-close');
 const webDriverBanner = document.getElementById('web-driver-banner');
 const webDriverBannerOffBtn = document.getElementById('web-driver-banner-off');
+
+const settingsBtn = document.getElementById('settings-btn');
+const settingsOverlay = document.getElementById('settings-overlay');
+const settingsRulesEl = document.getElementById('settings-rules');
+const settingsAddRuleBtn = document.getElementById('settings-add-rule');
+const settingsCancelBtn = document.getElementById('settings-cancel');
+const settingsSaveBtn = document.getElementById('settings-save');
 
 const overlay = document.getElementById('modal-overlay');
 const modalLabel = document.getElementById('modal-label');
@@ -140,13 +147,13 @@ async function refreshGitInfo() {
   renderSidebar();
 }
 
-async function refreshSlnFiles() {
+async function refreshIdeMatches() {
   for (const folder of state.folders) {
     try {
-      const res = await ipcRenderer.invoke('app:list-sln', { dirPath: folder.path });
-      slnFiles.set(folder.id, res.files || []);
+      const res = await ipcRenderer.invoke('app:list-ide-matches', { dirPath: folder.path });
+      ideMatches.set(folder.id, res.matches || []);
     } catch {
-      slnFiles.set(folder.id, []);
+      ideMatches.set(folder.id, []);
     }
   }
   renderSidebar();
@@ -181,21 +188,25 @@ function openMenu(anchorEl, items, onSelect) {
   }, 0);
 }
 
-function launchSlnFile(file) {
-  ipcRenderer.invoke('fs:open-external', { filePath: file.path });
+function launchIdeMatch(folder, match) {
+  ipcRenderer.invoke('app:launch-ide', { dirPath: folder.path, ruleId: match.ruleId, fileName: match.fileName });
 }
 
-function handleSlnClick(folder, anchorEl) {
-  const files = slnFiles.get(folder.id) || [];
-  if (files.length === 0) return;
-  if (files.length === 1) {
-    launchSlnFile(files[0]);
+function ideMatchLabel(match) {
+  return match.fileName ? `${match.label} — ${match.fileName}` : match.label;
+}
+
+function handleIdeClick(folder, anchorEl) {
+  const matches = ideMatches.get(folder.id) || [];
+  if (matches.length === 0) return;
+  if (matches.length === 1) {
+    launchIdeMatch(folder, matches[0]);
     return;
   }
   openMenu(
     anchorEl,
-    files.map((f) => ({ label: f.name, file: f })),
-    (item) => launchSlnFile(item.file)
+    matches.map((m) => ({ label: ideMatchLabel(m), match: m })),
+    (item) => launchIdeMatch(folder, item.match)
   );
 }
 
@@ -229,16 +240,15 @@ function renderSidebar() {
     main.appendChild(el('span', 'folder-icon', '📦'));
     main.appendChild(el('span', 'folder-name', folder.name));
 
-    const slns = slnFiles.get(folder.id) || [];
-    if (slns.length > 0) {
-      const slnBtn = el('button', 'row-btn sln-btn', '🧩');
-      slnBtn.title =
-        slns.length === 1 ? `Open ${slns[0].name} in Visual Studio` : `Open solution (${slns.length} found)`;
-      slnBtn.addEventListener('click', (ev) => {
+    const matches = ideMatches.get(folder.id) || [];
+    if (matches.length > 0) {
+      const ideBtn = el('button', 'row-btn ide-btn', '🧰');
+      ideBtn.title = matches.length === 1 ? `Open in ${ideMatchLabel(matches[0])}` : `Open in IDE (${matches.length} options)`;
+      ideBtn.addEventListener('click', (ev) => {
         ev.stopPropagation();
-        handleSlnClick(folder, slnBtn);
+        handleIdeClick(folder, ideBtn);
       });
-      main.appendChild(slnBtn);
+      main.appendChild(ideBtn);
     }
 
     const newBtn = el('button', 'row-btn', '+');
@@ -656,7 +666,7 @@ async function removeFolder(folder) {
   const res = await ipcRenderer.invoke('app:remove-folder', { folderId: folder.id });
   state = res.state;
   gitInfo.delete(folder.id);
-  slnFiles.delete(folder.id);
+  ideMatches.delete(folder.id);
   folderBrowseDir.delete(folder.id);
 
   if (filesPanelState && filesPanelState.folderId === folder.id) {
@@ -696,7 +706,7 @@ addFolderBtn.addEventListener('click', async () => {
     }
     renderSidebar();
     refreshGitInfo();
-    refreshSlnFiles();
+    refreshIdeMatches();
   });
 });
 
@@ -797,7 +807,7 @@ cloneSubmitBtn.addEventListener('click', async () => {
     state = res.state;
     renderSidebar();
     refreshGitInfo();
-    refreshSlnFiles();
+    refreshIdeMatches();
     cloneOverlay.classList.add('hidden');
   } else {
     cloneLogEl.textContent += `\nError: ${res.error}\n`;
@@ -824,7 +834,7 @@ newFolderBtn.addEventListener('click', async () => {
     }
     renderSidebar();
     refreshGitInfo();
-    refreshSlnFiles();
+    refreshIdeMatches();
   });
 });
 
@@ -894,6 +904,93 @@ webDriverCopyBtn.addEventListener('click', () => {
 
 webDriverCloseBtn.addEventListener('click', () => {
   webDriverOverlay.classList.add('hidden');
+});
+
+let editingIdeRules = [];
+
+function renderSettingsRules() {
+  settingsRulesEl.innerHTML = '';
+  for (const rule of editingIdeRules) {
+    const row = el('div', 'settings-rule-row');
+
+    const labelInput = document.createElement('input');
+    labelInput.value = rule.label;
+    labelInput.placeholder = 'Label';
+    labelInput.addEventListener('input', () => {
+      rule.label = labelInput.value;
+    });
+    row.appendChild(labelInput);
+
+    const kindSelect = document.createElement('select');
+    for (const [value, text] of [
+      ['glob', 'Match files'],
+      ['always', 'Always offered'],
+    ]) {
+      const opt = document.createElement('option');
+      opt.value = value;
+      opt.textContent = text;
+      if (rule.matchKind === value) opt.selected = true;
+      kindSelect.appendChild(opt);
+    }
+    row.appendChild(kindSelect);
+
+    const matchInput = document.createElement('input');
+    matchInput.value = rule.match;
+    matchInput.placeholder = 'e.g. *.sln or .idea';
+    matchInput.disabled = rule.matchKind === 'always';
+    matchInput.addEventListener('input', () => {
+      rule.match = matchInput.value;
+    });
+    row.appendChild(matchInput);
+
+    kindSelect.addEventListener('change', () => {
+      rule.matchKind = kindSelect.value;
+      matchInput.disabled = rule.matchKind === 'always';
+    });
+
+    const commandInput = document.createElement('input');
+    commandInput.value = rule.command;
+    commandInput.placeholder = 'e.g. code {folder}';
+    commandInput.addEventListener('input', () => {
+      rule.command = commandInput.value;
+    });
+    row.appendChild(commandInput);
+
+    const removeBtn = el('button', 'settings-rule-remove', '✕');
+    removeBtn.title = 'Remove rule';
+    removeBtn.addEventListener('click', () => {
+      editingIdeRules = editingIdeRules.filter((r) => r !== rule);
+      renderSettingsRules();
+    });
+    row.appendChild(removeBtn);
+
+    settingsRulesEl.appendChild(row);
+  }
+}
+
+settingsBtn.addEventListener('click', async () => {
+  const res = await ipcRenderer.invoke('app:get-ide-rules');
+  editingIdeRules = (res.rules || []).map((r) => ({ ...r }));
+  renderSettingsRules();
+  settingsOverlay.classList.remove('hidden');
+});
+
+settingsAddRuleBtn.addEventListener('click', () => {
+  editingIdeRules.push({ id: crypto.randomUUID(), label: '', matchKind: 'glob', match: '', command: '' });
+  renderSettingsRules();
+});
+
+settingsCancelBtn.addEventListener('click', () => {
+  settingsOverlay.classList.add('hidden');
+});
+
+settingsSaveBtn.addEventListener('click', async () => {
+  const cleaned = editingIdeRules
+    .map((r) => ({ ...r, label: r.label.trim(), match: r.match.trim(), command: r.command.trim() }))
+    .filter((r) => r.label && r.command && (r.matchKind === 'always' || r.match));
+  await ipcRenderer.invoke('app:save-ide-rules', { rules: cleaned });
+  settingsOverlay.classList.add('hidden');
+  refreshIdeMatches();
 });
 
 checkUpdateBtn.addEventListener('click', async () => {
@@ -979,6 +1076,6 @@ window.addEventListener('resize', () => {
   applyAutoResumeButton();
   applyLayout();
   refreshGitInfo();
-  refreshSlnFiles();
+  refreshIdeMatches();
   setInterval(refreshGitInfo, 10000);
 })();
