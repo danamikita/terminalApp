@@ -156,6 +156,11 @@ function controlPage(): string {
     </header>
     <div id="termContainer"></div>
     <div class="keys">
+      <button id="scrollUpBtn">▲ Scroll</button>
+      <button id="scrollDownBtn">▼ Scroll</button>
+      <button id="scrollBottomBtn">⤓ Bottom</button>
+    </div>
+    <div class="keys">
       <button data-byte="\\u001b">Esc</button>
       <button data-byte="\\t">Tab</button>
       <button data-byte="\\u0003">Ctrl+C</button>
@@ -324,7 +329,7 @@ function controlPage(): string {
       };
     }
 
-    for (const btn of document.querySelectorAll('.keys button')) {
+    for (const btn of document.querySelectorAll('.keys button[data-byte]')) {
       btn.addEventListener('click', () => {
         if (!currentSessionId) return;
         const data = JSON.parse('"' + btn.dataset.byte + '"');
@@ -337,6 +342,14 @@ function controlPage(): string {
         );
       });
     }
+
+    // xterm.js manages scrollback itself (it redraws rows rather than growing
+    // a real scrollable DOM element), so a touch device's native scroll
+    // gesture doesn't reliably drive it — these call its own scroll API
+    // directly, which works regardless of touch/trackpad/wheel quirks.
+    document.getElementById('scrollUpBtn').addEventListener('click', () => term && term.scrollLines(-10));
+    document.getElementById('scrollDownBtn').addEventListener('click', () => term && term.scrollLines(10));
+    document.getElementById('scrollBottomBtn').addEventListener('click', () => term && term.scrollToBottom());
 
     document.getElementById('backBtn').addEventListener('click', () => {
       location.hash = '';
