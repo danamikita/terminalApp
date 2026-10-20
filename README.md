@@ -34,8 +34,11 @@ browser, code editor, and a full git panel.
 - **Run scripts in a new session** — right-click a `.ps1`/`.bat`/`.cmd`/`.sh`/
   `.py`/`.js`/`.mjs`/`.cjs`/`.rb`/`.pl` file to run it in a fresh session with
   the right shell or interpreter already chosen for you
-- **.sln detection** — folders containing a Visual Studio solution get a button
-  to launch it directly
+- **IDE launch rules** — folders matching a known project marker (`.sln` →
+  Visual Studio, `.idea` → Rider, `build.gradle`/`settings.gradle` → Android
+  Studio, or any folder → VS Code) get a button to launch it directly;
+  configurable in **⚙ Settings** — add/edit/remove rules, each a match pattern
+  plus a `{file}`/`{folder}` command template
 - **Split view** — see the file browser and a terminal side by side
 - **Collapsible sidebar**
 
@@ -56,11 +59,13 @@ browser, code editor, and a full git panel.
 
 ### Automation & feedback
 
-- **Opt-in web driver** — a toggleable HTTP driver for automating the app
-  (click/type/press/eval/screenshot and more) over your local network, gated by
-  a random per-session token and off by default; a persistent banner reminds you
-  while it's on. Handy for scripting the app, or for assistants like Claude to
-  drive it directly — see [the source](electron/web-driver.ts) for the command set.
+- **Opt-in web driver** — a toggleable remote control server, reachable over
+  your local network (e.g. from a phone), gated by a random per-session token
+  and off by default; a persistent banner reminds you while it's on. Opening
+  the link shows your running sessions; pick one and you get its real
+  terminal — live output, native typing, and resizing the real session to fit
+  your screen — with a Back button to return to the list and switch to
+  another. See [the source](electron/web-driver.ts) for the HTTP routes.
 - **In-app feedback** — opens a pre-filled GitHub issue (bug or idea) with your
   app version and OS attached; nothing is sent until you submit it yourself
 - **Update checks** — automatic on launch and periodically while running, plus
@@ -120,7 +125,8 @@ npm run dev
   script to run it in a new session.
 - **🌿 Git** — a full git panel for that folder: switch branches, pull/push,
   stage/unstage files, view diffs, and commit
-- **🧩 (folder row)** — appears when the folder has a `.sln` file; click to launch it
+- **🧰 (folder row)** — appears when a folder matches an IDE launch rule; click
+  to launch it (or pick one, if more than one matches)
 - **＋ (folder row)** — start a new session in that folder (pick a shell, enter
   a command, defaults to `claude`)
 - **✕ (folder row)** — remove a folder (kills any running sessions in it)
@@ -131,6 +137,7 @@ npm run dev
 - **🧪 Web Driver** — toggle the opt-in HTTP automation driver (see
   [Features](#features) above); shows the link to copy and a warning banner
   while it's on
+- **⚙ Settings** — add, edit, or remove IDE launch rules
 - **🐛 Feedback** — opens a pre-filled "New Issue" page on GitHub in your
   browser (with your app version and OS included) so bugs and ideas land
   straight in the repo's issue tracker; nothing is sent until you submit it
@@ -154,7 +161,8 @@ renderer/      The UI (plain HTML/CSS/JS) — sidebar, xterm.js terminals,
                 file browser, markdown preview (renderer.js), the
                 CodeMirror editor (editor.js), and the git panel (git-panel.js)
 src/           Code shared by the main process: config load/save, git
-                plumbing, the node-pty wrapper, and shared types
+                plumbing, the node-pty wrapper, IDE rule matching/launch
+                (ide-rules.ts), and shared types
 scripts/       electron-drive.mjs — a Playwright-based CLI driver used to
                 test the app end-to-end (separate from the in-app web driver)
 ```
@@ -175,10 +183,13 @@ content. Markdown file contents are rendered as HTML, so they're parsed with
 `marked` and sanitized with `DOMPurify` before being inserted into the page.
 
 The optional web driver (off by default) listens on your local network and
-runs arbitrary JS in the renderer — with nodeIntegration on, that's full Node
-access. It's gated by a random per-session token, and the UI shows a
-persistent warning banner the whole time it's enabled, but treat that token
-like a credential for as long as it's on. See the comment at the top of
+gives real control of your running sessions — anyone with the link can type
+into any of them, same as sitting at the keyboard. It's gated by a random
+per-session token, and the UI shows a persistent warning banner the whole
+time it's enabled, but treat that token like a credential for as long as
+it's on. Opening a session remotely also resizes its real PTY to match the
+remote screen, so the desktop terminal view will reflow if both are open at
+once. See the comment at the top of
 [`electron/web-driver.ts`](electron/web-driver.ts) for the full threat model.
 
 ## Releasing a new version

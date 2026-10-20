@@ -72,6 +72,7 @@ export class PtySession {
   private bufferBytes = 0;
   private readonly maxBufferBytes = 200_000;
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
+  private dataListeners = new Set<(data: string) => void>();
 
   onData?: (data: string) => void;
   onExit?: () => void;
@@ -108,6 +109,7 @@ export class PtySession {
         this.onActivityChange?.();
       }
       this.onData?.(data);
+      for (const cb of this.dataListeners) cb(data);
     });
 
     this.proc.onExit(({ exitCode }) => {
@@ -137,6 +139,11 @@ export class PtySession {
 
   getBuffer(): string {
     return this.buffer.join('');
+  }
+
+  addDataListener(cb: (data: string) => void): () => void {
+    this.dataListeners.add(cb);
+    return () => this.dataListeners.delete(cb);
   }
 
   private pushBuffer(data: string): void {

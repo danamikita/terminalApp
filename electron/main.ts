@@ -589,7 +589,26 @@ ipcMain.handle('app:toggle-web-driver', async (_e, args: { enabled: boolean }) =
     return { ok: true, enabled: true, port: webDriver.port, token: webDriver.token, lanAddress: getLanAddress() };
   }
   try {
-    webDriver = await startWebDriver(() => win, WEB_DRIVER_PORT);
+    webDriver = await startWebDriver(
+      {
+        listState: getState,
+        getSessionBuffer: (id) => findSession(id)?.getBuffer() ?? null,
+        subscribeSessionData: (id, cb) => findSession(id)?.addDataListener(cb) ?? null,
+        writeToSession: (id, data) => {
+          const s = findSession(id);
+          if (!s) return false;
+          s.write(data);
+          return true;
+        },
+        resizeSession: (id, cols, rows) => {
+          const s = findSession(id);
+          if (!s) return false;
+          s.resize(cols, rows);
+          return true;
+        },
+      },
+      WEB_DRIVER_PORT
+    );
     return { ok: true, enabled: true, port: webDriver.port, token: webDriver.token, lanAddress: getLanAddress() };
   } catch (e) {
     return { ok: false, error: (e as Error).message };

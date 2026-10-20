@@ -1,7 +1,6 @@
-// An opt-in HTTP driver for the app's own BrowserWindow. Mirrors the
-// command set of scripts/electron-drive.mjs (click/type/press/wait/eval/
-// state/screenshot/sleep) but drives the real running window directly via
-// webContents, instead of relaunching a separate Playwright instance.
+// An opt-in HTTP server giving real remote control of this app's terminal
+// sessions — a session list you pick from, and a real xterm.js terminal
+// (fed by the actual PTY output, not a screenshot) once you open one.
 // Never started automatically — see app:toggle-web-driver in main.ts,
 // which is wired to a UI toggle that defaults to off every launch.
 //
@@ -9,15 +8,19 @@
 // any device on the local network (e.g. a phone), not just this machine —
 // that's deliberate, so the link can be opened off-PC. Every request still
 // requires a random per-session token (shown in the UI when enabled, with
-// a copy-to-clipboard button) via the X-Driver-Token header; the token,
-// not the network boundary, is what gates access. `eval` runs arbitrary JS
-// in the renderer (which has full Node access), so treat the token like a
-// root credential for anyone on the LAN for as long as the driver is on.
+// a copy-to-clipboard button) via the X-Driver-Token header (or a ?token=
+// query param for the one route — the SSE stream — that a browser's
+// EventSource can't attach headers to); the token, not the network
+// boundary, is what gates access. Anyone with the token can type into any
+// of your running shell sessions, same as sitting at the keyboard — treat
+// it like a credential for as long as the driver is on.
 import * as http from 'http';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { randomUUID } from 'crypto';
 import * as os from 'os';
-import type { BrowserWindow, KeyboardInputEvent, MouseInputEvent } from 'electron';
+import * as fs from 'fs';
+import * as path from 'path';
+import type { AppState } from '../src/types';
 
 // Interface names that are virtual/VPN adapters rather than the NIC a phone
 // on the same Wi-Fi can actually reach — e.g. Tailscale assigns a CGNAT
@@ -49,120 +52,12 @@ export interface WebDriverHandle {
   stop: () => Promise<void>;
 }
 
-type Cmd = 'click' | 'mouseclick' | 'tap' | 'type' | 'press' | 'wait' | 'eval' | 'state' | 'screenshot' | 'sleep';
-
-interface CmdRequest {
-  cmd: Cmd;
-  arg?: string;
-}
-
-const STATE_SNIPPET = `[...document.querySelectorAll('[data-testid="session-row"]')].map((el) => ({
-  id: el.dataset.sessionId,
-  name: el.querySelector('.session-name')?.textContent,
-  status: el.dataset.status,
-  activity: el.dataset.activity,
-  attention: el.dataset.attention === 'true',
-}))`;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function waitForSelector(win: BrowserWindow, selector: string, timeoutMs = 10_000): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  const expr = `!!document.querySelector(${JSON.stringify(selector)})`;
-  while (Date.now() < deadline) {
-    if (await win.webContents.executeJavaScript(expr)) return true;
-    await sleep(100);
-  }
-  return false;
-}
-
-const KEY_ALIASES: Record<string, string> = { esc: 'Escape', return: 'Enter', del: 'Delete' };
-const MODIFIER_ALIASES: Record<string, string> = { ctrl: 'control', cmd: 'meta', option: 'alt' };
-
-function parseKeyCombo(combo: string): { modifiers: KeyboardInputEvent['modifiers']; keyCode: string } {
-  const parts = combo.split('+').map((p) => p.trim());
-  const keyPart = parts.pop() || '';
-  const modifiers = parts.map((p) => {
-    const lower = p.toLowerCase();
-    return (MODIFIER_ALIASES[lower] || lower) as NonNullable<KeyboardInputEvent['modifiers']>[number];
-  });
-  const keyCode = KEY_ALIASES[keyPart.toLowerCase()] || keyPart;
-  return { modifiers, keyCode };
-}
-
-async function runCommand(win: BrowserWindow, req: CmdRequest): Promise<unknown> {
-  const arg = req.arg || '';
-  switch (req.cmd) {
-    case 'click': {
-      const found = await win.webContents.executeJavaScript(`(() => {
-        const el = document.querySelector(${JSON.stringify(arg)});
-        if (!el) return false;
-        el.click();
-        return true;
-      })()`);
-      return { found };
-    }
-    case 'mouseclick': {
-      const box: { x: number; y: number } | null = await win.webContents.executeJavaScript(`(() => {
-        const el = document.querySelector(${JSON.stringify(arg)});
-        if (!el) return null;
-        const r = el.getBoundingClientRect();
-        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
-      })()`);
-      if (!box) return { found: false };
-      const base: Omit<MouseInputEvent, 'type'> = { x: box.x, y: box.y, button: 'left', clickCount: 1 };
-      win.webContents.sendInputEvent({ type: 'mouseDown', ...base });
-      win.webContents.sendInputEvent({ type: 'mouseUp', ...base });
-      return { found: true, x: box.x, y: box.y };
-    }
-    case 'tap': {
-      // fx/fy are fractional (0..1) coordinates within the window's content
-      // area — used by the live-mirror page, which only knows where a tap
-      // landed on the displayed screenshot image, not the window's actual
-      // pixel size.
-      const [fxStr, fyStr] = arg.split(',');
-      const [width, height] = win.getContentSize();
-      const x = Math.round(Number(fxStr) * width);
-      const y = Math.round(Number(fyStr) * height);
-      const base: Omit<MouseInputEvent, 'type'> = { x, y, button: 'left', clickCount: 1 };
-      win.webContents.sendInputEvent({ type: 'mouseDown', ...base });
-      win.webContents.sendInputEvent({ type: 'mouseUp', ...base });
-      return { x, y };
-    }
-    case 'type': {
-      for (const ch of arg) {
-        win.webContents.sendInputEvent({ type: 'char', keyCode: ch } as KeyboardInputEvent);
-      }
-      return { typed: arg.length };
-    }
-    case 'press': {
-      const { modifiers, keyCode } = parseKeyCombo(arg);
-      win.webContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
-      win.webContents.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
-      return { pressed: arg };
-    }
-    case 'wait': {
-      return { found: await waitForSelector(win, arg) };
-    }
-    case 'eval': {
-      return await win.webContents.executeJavaScript(arg);
-    }
-    case 'state': {
-      return await win.webContents.executeJavaScript(STATE_SNIPPET);
-    }
-    case 'screenshot': {
-      const image = await win.webContents.capturePage();
-      return { pngBase64: image.toPNG().toString('base64') };
-    }
-    case 'sleep': {
-      await sleep(Number(arg) || 500);
-      return {};
-    }
-    default:
-      throw new Error(`unknown command: ${req.cmd}`);
-  }
+export interface WebDriverDeps {
+  listState: () => AppState;
+  getSessionBuffer: (sessionId: string) => string | null;
+  subscribeSessionData: (sessionId: string, cb: (data: string) => void) => (() => void) | null;
+  writeToSession: (sessionId: string, data: string) => boolean;
+  resizeSession: (sessionId: string, cols: number, rows: number) => boolean;
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -176,154 +71,311 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
+function sendJson(res: ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(body));
+}
+
+// node_modules/@xterm/... is already shipped (it's a production dependency
+// the renderer requires directly), so these are always present alongside a
+// running build — read once and cached, not re-read per request.
+const vendorCache = new Map<string, Buffer>();
+function readVendorFile(relPath: string): Buffer | null {
+  const cached = vendorCache.get(relPath);
+  if (cached) return cached;
+  try {
+    const full = path.join(__dirname, '..', '..', 'node_modules', relPath);
+    const buf = fs.readFileSync(full);
+    vendorCache.set(relPath, buf);
+    return buf;
+  } catch {
+    return null;
+  }
+}
+
 function controlPage(): string {
   return `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>terminalApp driver</title>
+<title>terminalApp remote control</title>
+<link rel="stylesheet" href="/vendor/xterm.css">
 <style>
   * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
   body {
-    font-family: Consolas, monospace; background:#1e1e1e; color:#ddd; margin:0; padding:10px;
-    -webkit-tap-highlight-color: transparent;
+    font-family: Consolas, monospace; background:#1e1e1e; color:#ddd;
+    display: flex; flex-direction: column; -webkit-tap-highlight-color: transparent;
   }
-  h3 { margin: 0 0 8px; font-size: 14px; color: #eee; }
-  #mirror-wrap { position: relative; border: 1px solid #444; border-radius: 6px; overflow: hidden; background: #111; }
-  #mirror { width: 100%; display: block; cursor: crosshair; }
-  #status { font-size: 11px; color: #888; margin: 6px 0 10px; }
-  .row { display: flex; gap: 6px; margin-bottom: 8px; }
-  input, button, select { font-family: inherit; font-size: 13px; }
-  input {
-    flex: 1; background:#1e1e1e; color:#fff; border:1px solid #444; border-radius:4px; padding:6px 8px;
+  h3 { margin: 0; font-size: 14px; color: #eee; }
+  header { display:flex; align-items:center; gap:10px; padding:10px; border-bottom:1px solid #333; }
+  #status { font-size: 11px; color: #888; }
+  #listView, #terminalView { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  #listView.hidden, #terminalView.hidden { display: none; }
+  #folders { flex: 1; overflow-y: auto; padding: 8px; }
+  .folder-name { font-size: 12px; color: #999; margin: 12px 4px 4px; text-transform: uppercase; letter-spacing: .04em; }
+  .session-row {
+    display: flex; align-items: center; gap: 8px; padding: 10px 8px; border-radius: 6px; cursor: pointer;
   }
+  .session-row:active { background: #2a2d2e; }
+  .session-row .name { flex: 1; font-size: 14px; }
+  .session-row .last-cmd { font-size: 11px; color: #888; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .dot.idle { background: #3c9d3c; }
+  .dot.busy { background: #3a9fd9; box-shadow: 0 0 6px #3a9fd9; }
+  .dot.exited { background: #666; }
+  .attn { color: #e5a93c; }
+  #empty { padding: 20px; color: #888; font-size: 13px; }
   button {
     background:#3a3d3e; color:#ddd; border:1px solid #444; border-radius:4px; padding:6px 10px; cursor:pointer;
+    font-family: inherit; font-size: 13px;
   }
   button:hover { filter: brightness(1.15); }
-  #typeSend { background:#0e639c; border-color:#0e639c; color:#fff; }
-  .keys { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
-  .keys button { flex: 1; min-width: 56px; }
-  details { border-top: 1px solid #333; padding-top: 10px; }
-  summary { cursor: pointer; color: #aaa; font-size: 12px; margin-bottom: 8px; }
-  #arg { width: auto; }
-  pre { white-space:pre-wrap; word-break:break-all; background:#111; border:1px solid #333; padding:8px; min-height:60px; font-size: 12px; }
+  #backBtn { background:#0e639c; border-color:#0e639c; color:#fff; }
+  #termTitle { flex: 1; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #termContainer { flex: 1; min-height: 0; padding: 4px; }
+  .keys { display: flex; gap: 6px; padding: 8px; border-top: 1px solid #333; }
+  .keys button { flex: 1; }
 </style>
 </head>
 <body>
-  <h3>🖥️ terminalApp — live remote control</h3>
-  <div id="mirror-wrap">
-    <img id="mirror" alt="live app view — tap to click">
-  </div>
-  <div id="status">connecting…</div>
+  <header>
+    <h3>🖥️ Remote control</h3>
+    <div id="status"></div>
+  </header>
 
-  <div class="row">
-    <input id="typeInput" placeholder="Type text, then Send or Enter" autocapitalize="off" autocorrect="off" />
-    <button id="typeSend">Send</button>
-  </div>
-  <div class="keys">
-    <button id="keyEnter">⏎ Enter</button>
-    <button id="keyTab">Tab</button>
-    <button id="keyEsc">Esc</button>
-    <button id="keyBack">⌫</button>
-    <button id="keyCtrlC">Ctrl+C</button>
+  <div id="listView">
+    <div id="folders"></div>
   </div>
 
-  <details>
-    <summary>Advanced: raw commands</summary>
-    <div class="row">
-      <select id="cmd">
-        <option>click</option><option>mouseclick</option><option>type</option><option>press</option>
-        <option>wait</option><option>eval</option><option>state</option><option>screenshot</option><option>sleep</option>
-      </select>
-      <input id="arg" placeholder="arg (selector / text / js expr / ms)" />
-      <button id="send">Send</button>
+  <div id="terminalView" class="hidden">
+    <header>
+      <button id="backBtn">← Back</button>
+      <div id="termTitle"></div>
+    </header>
+    <div id="termContainer"></div>
+    <div class="keys">
+      <button data-byte="\\u001b">Esc</button>
+      <button data-byte="\\t">Tab</button>
+      <button data-byte="\\u0003">Ctrl+C</button>
+      <button data-byte="\\u0004">Ctrl+D</button>
     </div>
-    <pre id="out"></pre>
-  </details>
+  </div>
 
+  <script src="/vendor/xterm.js"></script>
+  <script src="/vendor/addon-fit.js"></script>
   <script>
     const token = new URLSearchParams(location.search).get('token') || prompt('Driver token:');
     const statusEl = document.getElementById('status');
-    const img = document.getElementById('mirror');
+    const foldersEl = document.getElementById('folders');
+    const listView = document.getElementById('listView');
+    const terminalView = document.getElementById('terminalView');
+    const termTitleEl = document.getElementById('termTitle');
+    const termContainerEl = document.getElementById('termContainer');
 
-    async function sendCmd(cmd, arg) {
-      const res = await fetch('/cmd', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Driver-Token': token },
-        body: JSON.stringify({ cmd, arg }),
-      });
-      return res.json();
+    function authedFetch(url, opts) {
+      opts = opts || {};
+      opts.headers = Object.assign({}, opts.headers, { 'X-Driver-Token': token });
+      return fetch(url, opts);
     }
 
-    let refreshTimer = null;
-    function scheduleRefresh(delay) {
-      clearTimeout(refreshTimer);
-      refreshTimer = setTimeout(refreshShot, delay);
+    function statusDotClass(session) {
+      if (session.status === 'exited') return 'exited';
+      return session.activity === 'busy' ? 'busy' : 'idle';
     }
-    function refreshShot() {
-      img.src = '/screenshot?token=' + encodeURIComponent(token) + '&t=' + Date.now();
-    }
-    img.addEventListener('load', () => {
-      statusEl.textContent = 'live — updated ' + new Date().toLocaleTimeString();
-      scheduleRefresh(500);
-    });
-    img.addEventListener('error', () => {
-      statusEl.textContent = 'could not reach the app — retrying…';
-      scheduleRefresh(1500);
-    });
-    refreshShot();
 
-    img.addEventListener('click', async (ev) => {
-      const rect = img.getBoundingClientRect();
-      const fx = (ev.clientX - rect.left) / rect.width;
-      const fy = (ev.clientY - rect.top) / rect.height;
-      await sendCmd('tap', fx.toFixed(4) + ',' + fy.toFixed(4));
-      scheduleRefresh(150);
-    });
-
-    async function sendTyped() {
-      const el = document.getElementById('typeInput');
-      if (el.value) await sendCmd('type', el.value);
-      el.value = '';
-      scheduleRefresh(150);
-    }
-    document.getElementById('typeSend').addEventListener('click', sendTyped);
-    document.getElementById('typeInput').addEventListener('keydown', (ev) => {
-      if (ev.key === 'Enter') {
-        ev.preventDefault();
-        sendTyped();
+    const sessionNames = {};
+    let listPoll = null;
+    async function refreshList() {
+      try {
+        const res = await authedFetch('/sessions');
+        const state = await res.json();
+        renderList(state);
+        statusEl.textContent = 'connected';
+      } catch (e) {
+        statusEl.textContent = 'could not reach the app — retrying…';
       }
-    });
+    }
 
-    const quickKeys = {
-      keyEnter: 'Enter',
-      keyTab: 'Tab',
-      keyEsc: 'Escape',
-      keyBack: 'Backspace',
-      keyCtrlC: 'Control+c',
-    };
-    for (const id of Object.keys(quickKeys)) {
-      document.getElementById(id).addEventListener('click', async () => {
-        await sendCmd('press', quickKeys[id]);
-        scheduleRefresh(150);
+    function renderList(state) {
+      foldersEl.innerHTML = '';
+      const folders = (state.folders || []).filter((f) => f.sessions.length > 0);
+      if (folders.length === 0) {
+        const empty = document.createElement('div');
+        empty.id = 'empty';
+        empty.textContent = 'No running sessions.';
+        foldersEl.appendChild(empty);
+        return;
+      }
+      for (const folder of folders) {
+        const heading = document.createElement('div');
+        heading.className = 'folder-name';
+        heading.textContent = folder.name;
+        foldersEl.appendChild(heading);
+        for (const session of folder.sessions) {
+          sessionNames[session.id] = session.name;
+          const row = document.createElement('div');
+          row.className = 'session-row';
+          row.innerHTML =
+            '<div class="dot ' + statusDotClass(session) + '"></div>' +
+            '<div class="name">' + (session.attention ? '<span class="attn">●</span> ' : '') +
+              escapeHtml(session.name) + '</div>' +
+            '<div class="last-cmd">' + escapeHtml(session.lastCommand || '') + '</div>';
+          row.addEventListener('click', () => {
+            location.hash = '#/session/' + session.id;
+          });
+          foldersEl.appendChild(row);
+        }
+      }
+    }
+
+    function escapeHtml(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    let term = null;
+    let fitAddon = null;
+    let eventSource = null;
+    let resizeDebounce = null;
+    // Each keystroke fires its own POST; without serializing them, concurrent
+    // fetches can land at the server out of the order they were typed in
+    // (observed with fast/automated typing). Chaining through one promise
+    // guarantees in-order delivery without blocking the UI.
+    let inputChain = Promise.resolve();
+
+    function closeSession() {
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+      if (term) {
+        term.dispose();
+        term = null;
+      }
+      window.removeEventListener('resize', scheduleResizeSend);
+      termContainerEl.innerHTML = '';
+    }
+
+    function scheduleResizeSend() {
+      clearTimeout(resizeDebounce);
+      resizeDebounce = setTimeout(sendResize, 200);
+    }
+
+    async function sendResize() {
+      if (!term || !fitAddon || !currentSessionId) return;
+      fitAddon.fit();
+      await authedFetch('/session/' + currentSessionId + '/resize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cols: term.cols, rows: term.rows }),
       });
     }
 
-    document.getElementById('send').addEventListener('click', async () => {
-      const cmd = document.getElementById('cmd').value;
-      const arg = document.getElementById('arg').value;
-      const json = await sendCmd(cmd, arg);
-      document.getElementById('out').textContent = JSON.stringify(json, null, 2);
-      scheduleRefresh(150);
+    let currentSessionId = null;
+    async function openSession(sessionId) {
+      closeSession();
+      currentSessionId = sessionId;
+      termTitleEl.textContent = sessionNames[sessionId] || sessionId;
+
+      term = new Terminal({
+        cursorBlink: true,
+        fontSize: 14,
+        fontFamily: 'Consolas, "Courier New", monospace',
+        theme: { background: '#1e1e1e', foreground: '#d4d4d4' },
+      });
+      fitAddon = new FitAddon.FitAddon();
+      term.loadAddon(fitAddon);
+      term.open(termContainerEl);
+      fitAddon.fit();
+
+      inputChain = Promise.resolve();
+      term.onData((data) => {
+        inputChain = inputChain.then(() =>
+          authedFetch('/session/' + sessionId + '/input', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data }),
+          }).catch(() => {})
+        );
+      });
+
+      window.addEventListener('resize', scheduleResizeSend);
+
+      try {
+        const bufRes = await authedFetch('/session/' + sessionId + '/buffer');
+        if (bufRes.ok) {
+          const { data } = await bufRes.json();
+          if (data) term.write(data);
+        }
+      } catch {
+        // best-effort — live stream still works even if the initial buffer fetch fails
+      }
+
+      await sendResize();
+
+      eventSource = new EventSource('/session/' + sessionId + '/stream?token=' + encodeURIComponent(token));
+      eventSource.onmessage = (ev) => {
+        term.write(JSON.parse(ev.data));
+      };
+    }
+
+    for (const btn of document.querySelectorAll('.keys button')) {
+      btn.addEventListener('click', () => {
+        if (!currentSessionId) return;
+        const data = JSON.parse('"' + btn.dataset.byte + '"');
+        inputChain = inputChain.then(() =>
+          authedFetch('/session/' + currentSessionId + '/input', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data }),
+          }).catch(() => {})
+        );
+      });
+    }
+
+    document.getElementById('backBtn').addEventListener('click', () => {
+      location.hash = '';
     });
+
+    function route() {
+      const match = /^#\\/session\\/(.+)$/.exec(location.hash);
+      if (match) {
+        clearInterval(listPoll);
+        listView.classList.add('hidden');
+        terminalView.classList.remove('hidden');
+        if (match[1] !== currentSessionId) openSession(match[1]);
+      } else {
+        closeSession();
+        currentSessionId = null;
+        terminalView.classList.add('hidden');
+        listView.classList.remove('hidden');
+        refreshList();
+        clearInterval(listPoll);
+        listPoll = setInterval(refreshList, 2000);
+      }
+    }
+
+    window.addEventListener('hashchange', route);
+    route();
   </script>
 </body>
 </html>`;
 }
 
-export function startWebDriver(getWindow: () => BrowserWindow | null, port: number): Promise<WebDriverHandle> {
+function serveVendorFile(res: ServerResponse, relPath: string, contentType: string): void {
+  const buf = readVendorFile(relPath);
+  if (!buf) {
+    sendJson(res, 404, { ok: false, error: 'vendor asset not found' });
+    return;
+  }
+  res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'public, max-age=3600' });
+  res.end(buf);
+}
+
+export function startWebDriver(deps: WebDriverDeps, port: number): Promise<WebDriverHandle> {
   return new Promise((resolve, reject) => {
     const token = randomUUID();
 
@@ -339,6 +391,7 @@ export function startWebDriver(getWindow: () => BrowserWindow | null, port: numb
       }
 
       const pathname = (req.url || '').split('?')[0];
+      const query = new URLSearchParams((req.url || '').split('?')[1] || '');
 
       if (req.method === 'GET' && pathname === '/') {
         res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -346,76 +399,120 @@ export function startWebDriver(getWindow: () => BrowserWindow | null, port: numb
         return;
       }
 
-      // A plain <img src> request can't carry the X-Driver-Token header, so
-      // this one route (only) accepts the token as a query param instead —
-      // used by the live-mirror page's auto-refreshing screenshot.
-      if (req.method === 'GET' && pathname === '/screenshot') {
-        const query = new URLSearchParams((req.url || '').split('?')[1] || '');
-        if (query.get('token') !== token) {
-          res.writeHead(401, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: false, error: 'bad or missing token' }));
+      if (req.method === 'GET' && pathname === '/vendor/xterm.js') {
+        serveVendorFile(res, path.join('@xterm', 'xterm', 'lib', 'xterm.js'), 'text/javascript');
+        return;
+      }
+      if (req.method === 'GET' && pathname === '/vendor/xterm.css') {
+        serveVendorFile(res, path.join('@xterm', 'xterm', 'css', 'xterm.css'), 'text/css');
+        return;
+      }
+      if (req.method === 'GET' && pathname === '/vendor/addon-fit.js') {
+        serveVendorFile(res, path.join('@xterm', 'addon-fit', 'lib', 'addon-fit.js'), 'text/javascript');
+        return;
+      }
+
+      // Everything below requires the token. EventSource can't set headers,
+      // so the stream route accepts it as a query param instead.
+      const sessionMatch = /^\/session\/([^/]+)\/(buffer|stream|input|resize)$/.exec(pathname);
+      const isStream = sessionMatch && sessionMatch[2] === 'stream';
+      const suppliedToken = isStream ? query.get('token') : req.headers['x-driver-token'];
+
+      if (pathname === '/sessions' || sessionMatch) {
+        if (suppliedToken !== token) {
+          sendJson(res, 401, { ok: false, error: 'bad or missing driver token' });
           return;
         }
-        const win = getWindow();
-        if (!win || win.isDestroyed()) {
-          res.writeHead(503, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: false, error: 'app window is not available' }));
+      } else {
+        sendJson(res, 404, { ok: false, error: 'not found' });
+        return;
+      }
+
+      if (req.method === 'GET' && pathname === '/sessions') {
+        sendJson(res, 200, deps.listState());
+        return;
+      }
+
+      if (!sessionMatch) {
+        sendJson(res, 404, { ok: false, error: 'not found' });
+        return;
+      }
+      const sessionId = sessionMatch[1];
+      const route = sessionMatch[2];
+
+      if (req.method === 'GET' && route === 'buffer') {
+        const data = deps.getSessionBuffer(sessionId);
+        if (data === null) {
+          sendJson(res, 404, { ok: false, error: 'session not found' });
           return;
         }
-        win.webContents
-          .capturePage()
-          .then((image) => {
-            res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
-            res.end(image.toPNG());
-          })
-          .catch((e) => {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: false, error: (e as Error).message }));
-          });
+        sendJson(res, 200, { data });
         return;
       }
 
-      if (req.method !== 'POST' || pathname !== '/cmd') {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: false, error: 'not found' }));
-        return;
-      }
-
-      if (req.headers['x-driver-token'] !== token) {
-        res.writeHead(401, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: false, error: 'bad or missing X-Driver-Token header' }));
-        return;
-      }
-
-      readBody(req)
-        .then(async (body) => {
-          let parsed: CmdRequest;
-          try {
-            parsed = JSON.parse(body);
-          } catch {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: false, error: 'invalid JSON body' }));
-            return;
-          }
-          const win = getWindow();
-          if (!win || win.isDestroyed()) {
-            res.writeHead(503, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: false, error: 'app window is not available' }));
-            return;
-          }
-          try {
-            const result = await runCommand(win, parsed);
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: true, result }));
-          } catch (e) {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: false, error: (e as Error).message }));
-          }
-        })
-        .catch((e) => {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: false, error: (e as Error).message }));
+      if (req.method === 'GET' && route === 'stream') {
+        if (deps.getSessionBuffer(sessionId) === null) {
+          sendJson(res, 404, { ok: false, error: 'session not found' });
+          return;
+        }
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-store',
+          Connection: 'keep-alive',
         });
+        res.write(': connected\n\n');
+        const unsubscribe = deps.subscribeSessionData(sessionId, (data) => {
+          res.write(`data: ${JSON.stringify(data)}\n\n`);
+        });
+        const keepalive = setInterval(() => res.write(': ping\n\n'), 15_000);
+        req.on('close', () => {
+          clearInterval(keepalive);
+          unsubscribe?.();
+        });
+        return;
+      }
+
+      if (req.method === 'POST' && route === 'input') {
+        readBody(req)
+          .then((body) => {
+            let parsed: { data?: string };
+            try {
+              parsed = JSON.parse(body);
+            } catch {
+              sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+              return;
+            }
+            const ok = deps.writeToSession(sessionId, parsed.data || '');
+            sendJson(res, ok ? 200 : 404, { ok });
+          })
+          .catch((e) => sendJson(res, 500, { ok: false, error: (e as Error).message }));
+        return;
+      }
+
+      if (req.method === 'POST' && route === 'resize') {
+        readBody(req)
+          .then((body) => {
+            let parsed: { cols?: number; rows?: number };
+            try {
+              parsed = JSON.parse(body);
+            } catch {
+              sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+              return;
+            }
+            const cols = Number(parsed.cols);
+            const rows = Number(parsed.rows);
+            if (!Number.isFinite(cols) || !Number.isFinite(rows) || cols <= 0 || rows <= 0) {
+              sendJson(res, 400, { ok: false, error: 'invalid cols/rows' });
+              return;
+            }
+            const ok = deps.resizeSession(sessionId, Math.round(cols), Math.round(rows));
+            sendJson(res, ok ? 200 : 404, { ok });
+          })
+          .catch((e) => sendJson(res, 500, { ok: false, error: (e as Error).message }));
+        return;
+      }
+
+      sendJson(res, 404, { ok: false, error: 'not found' });
     });
 
     server.once('error', reject);
