@@ -137,15 +137,37 @@ function buildGitBadge(folder) {
   return badge;
 }
 
+// Each folder's git status costs up to 4 sequential `git` subprocess spawns
+// in the main process. Doing all folders one at a time scales linearly with
+// folder count, and since this runs on a setInterval that doesn't wait for
+// the previous sweep, a slow sweep (lots of folders, a big repo, a network
+// drive) can cause the next one to start before it finishes — compounding
+// subprocess load and starving everything else sharing the machine's CPU,
+// including terminal rendering. Cap concurrency and skip starting a new
+// sweep while one's still running.
+let gitRefreshInFlight = false;
+const GIT_REFRESH_CONCURRENCY = 4;
 async function refreshGitInfo() {
-  for (const folder of state.folders) {
-    try {
-      gitInfo.set(folder.id, await ipcRenderer.invoke('git:info', { dirPath: folder.path }));
-    } catch {
-      gitInfo.set(folder.id, { isRepo: false });
+  if (gitRefreshInFlight) return;
+  gitRefreshInFlight = true;
+  try {
+    const folders = state.folders.slice();
+    let next = 0;
+    async function worker() {
+      while (next < folders.length) {
+        const folder = folders[next++];
+        try {
+          gitInfo.set(folder.id, await ipcRenderer.invoke('git:info', { dirPath: folder.path }));
+        } catch {
+          gitInfo.set(folder.id, { isRepo: false });
+        }
+      }
     }
+    await Promise.all(Array.from({ length: Math.min(GIT_REFRESH_CONCURRENCY, folders.length) }, worker));
+    renderSidebar();
+  } finally {
+    gitRefreshInFlight = false;
   }
-  renderSidebar();
 }
 
 async function refreshIdeMatches() {
