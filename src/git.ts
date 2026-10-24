@@ -1,4 +1,6 @@
 import { execFile, spawn } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
 import { BranchInfo, GitChange, GitFileStatusCode, GitInfo, GitOpResult, GitStatusResult } from './types';
 
 function run(args: string[], cwd: string): Promise<string> {
@@ -10,12 +12,40 @@ function run(args: string[], cwd: string): Promise<string> {
   });
 }
 
+// Like `run`, but preserves leading/trailing whitespace. `git status
+// --porcelain -z` entries are column-aligned ("XY path") and X can
+// legitimately be a space (unstaged-only change) — trimming the raw stdout
+// would eat that leading space off the first record and shift every field
+// in it by one character.
+function runRaw(args: string[], cwd: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile('git', args, { cwd, timeout: 3000 }, (err, stdout) => {
+      if (err) reject(err);
+      else resolve(stdout.toString());
+    });
+  });
+}
+
 function runAllowFail(args: string[], cwd: string): Promise<{ stdout: string; stderr: string; code: number }> {
   return new Promise((resolve) => {
     execFile('git', args, { cwd, timeout: 15000 }, (err, stdout, stderr) => {
       const code = err ? (typeof err.code === 'number' ? err.code : 1) : 0;
       resolve({ stdout: stdout.toString(), stderr: stderr.toString(), code });
     });
+  });
+}
+
+function runWithStdin(args: string[], cwd: string, input: string): Promise<{ stdout: string; stderr: string; code: number }> {
+  return new Promise((resolve) => {
+    const proc = spawn('git', args, { cwd });
+    let stdout = '';
+    let stderr = '';
+    proc.stdout?.on('data', (d) => (stdout += d.toString()));
+    proc.stderr?.on('data', (d) => (stderr += d.toString()));
+    proc.on('error', (err) => resolve({ stdout, stderr: err.message, code: 1 }));
+    proc.on('close', (code) => resolve({ stdout, stderr, code: code ?? 1 }));
+    proc.stdin?.write(input);
+    proc.stdin?.end();
   });
 }
 
@@ -91,6 +121,14 @@ export async function checkoutBranch(dirPath: string, branch: string): Promise<G
   return { ok: false, error: (res.stderr || res.stdout || 'Checkout failed.').trim() };
 }
 
+export async function createBranch(dirPath: string, name: string): Promise<GitOpResult> {
+  const trimmed = name.trim();
+  if (!trimmed) return { ok: false, error: 'Branch name is required.' };
+  const res = await runAllowFail(['checkout', '-b', trimmed], dirPath);
+  if (res.code === 0) return { ok: true };
+  return { ok: false, error: (res.stderr || res.stdout || 'Branch creation failed.').trim() };
+}
+
 export async function gitPull(dirPath: string): Promise<GitOpResult> {
   const res = await runAllowFail(['pull'], dirPath);
   const combined = [res.stdout, res.stderr].filter(Boolean).join('\n').trim();
@@ -115,6 +153,60 @@ export async function unstageFile(dirPath: string, relPath: string): Promise<Git
   const res = await runAllowFail(['reset', '--', relPath], dirPath);
   if (res.code === 0) return { ok: true };
   return { ok: false, error: (res.stderr || res.stdout || 'Unstaging failed.').trim() };
+}
+
+export async function discardFile(
+  dirPath: string,
+  relPath: string,
+  worktreeStatus: GitFileStatusCode | null,
+  indexStatus: GitFileStatusCode | null,
+  origPath?: string
+): Promise<GitOpResult> {
+  // Drop the file from the index first (no-op if it isn't staged) so a staged
+  // add/rename doesn't linger after the worktree side is restored or removed.
+  await runAllowFail(['reset', '--', relPath], dirPath);
+  if (origPath) await runAllowFail(['reset', '--', origPath], dirPath);
+
+  const isNew = worktreeStatus === 'untracked' || indexStatus === 'added';
+  if (isNew) {
+    try {
+      fs.unlinkSync(path.join(dirPath, relPath));
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') return { ok: false, error: (e as Error).message };
+    }
+    return { ok: true };
+  }
+
+  const restorePath = origPath || relPath;
+  const res = await runAllowFail(['checkout', 'HEAD', '--', restorePath], dirPath);
+  if (origPath && origPath !== relPath) {
+    try {
+      fs.unlinkSync(path.join(dirPath, relPath));
+    } catch {
+      // already gone
+    }
+  }
+  if (res.code === 0) return { ok: true };
+  return { ok: false, error: (res.stderr || res.stdout || 'Revert failed.').trim() };
+}
+
+export async function revertHunk(dirPath: string, relPath: string, patch: string, staged: boolean): Promise<GitOpResult> {
+  const args = ['apply', '--reverse', '--whitespace=nowarn'];
+  if (staged) args.push('--cached');
+  const res = await runWithStdin(args, dirPath, patch);
+  if (res.code !== 0) return { ok: false, error: (res.stderr || res.stdout || 'Revert failed.').trim() };
+
+  if (!staged) {
+    // `git apply` writes the working-tree file straight through the
+    // autocrlf smudge filter. On Windows repos with core.autocrlf=true,
+    // that can leave `git status` reporting the file as modified even
+    // though `git diff` agrees it's clean again — restaging and
+    // unstaging forces git to recompute and cache the correct stat/hash.
+    await runAllowFail(['add', '--', relPath], dirPath);
+    await runAllowFail(['reset', '--', relPath], dirPath);
+  }
+
+  return { ok: true };
 }
 
 export async function getDiff(dirPath: string, relPath: string, staged: boolean, untracked?: boolean): Promise<string> {
@@ -206,7 +298,7 @@ export async function getStatus(dirPath: string): Promise<GitStatusResult> {
 
   let raw = '';
   try {
-    raw = await run(['status', '--porcelain=v1', '-z'], dirPath);
+    raw = await runRaw(['status', '--porcelain=v1', '-z'], dirPath);
   } catch {
     raw = '';
   }

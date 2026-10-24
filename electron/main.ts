@@ -5,19 +5,22 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { execFileSync, exec } from 'child_process';
 import { loadConfig, saveConfig, makeFolder, setConfigDirName } from '../src/config';
-import { AppState, FolderConfig, FolderSnapshot, IdeRuleConfig, ShellType } from '../src/types';
+import { AppState, FolderConfig, FolderSnapshot, GitFileStatusCode, IdeRuleConfig, ShellType } from '../src/types';
 import { PtySession } from '../src/pty-session';
 import { findIdeMatches, buildLaunchPlan, defaultIdeRules } from '../src/ide-rules';
 import {
   getGitInfo,
   listBranches,
   checkoutBranch,
+  createBranch,
   gitPull,
   gitPush,
   getStatus,
   stageFile,
   unstageFile,
   getDiff,
+  discardFile,
+  revertHunk,
   commitStaged,
   cloneRepo,
 } from '../src/git';
@@ -42,6 +45,7 @@ const folders: FolderState[] = config.folders.map((f) => ({ ...f, sessions: [], 
 // Test-mode never auto-resumes real sessions, even if a prior test run saved some.
 let autoResumeEnabled = isTestMode ? false : config.autoResume !== false;
 let ideRules: IdeRuleConfig[] = config.ideRules && config.ideRules.length > 0 ? config.ideRules : defaultIdeRules();
+let defaultShell: ShellType = config.defaultShell || 'cmd';
 
 let win: BrowserWindow | null = null;
 let activeClone: { cancel: () => void } | null = null;
@@ -59,6 +63,7 @@ function persist(): void {
     folders: folders.map(({ sessions, expanded, ...f }) => f),
     autoResume: autoResumeEnabled,
     ideRules,
+    defaultShell,
   });
 }
 
@@ -134,6 +139,7 @@ function resumeSessionsOnStartup(): void {
 function getState(): AppState {
   return {
     autoResume: autoResumeEnabled,
+    defaultShell,
     folders: folders.map<FolderSnapshot>((f) => ({
       id: f.id,
       name: f.name,
@@ -401,15 +407,28 @@ ipcMain.handle('app:remove-folder', (_e, args: { folderId: string }) => {
   return { ok: true, state: getState() };
 });
 
+ipcMain.handle('app:reorder-folders', (_e, args: { orderedIds: string[] }) => {
+  const byId = new Map(folders.map((f) => [f.id, f]));
+  const reordered = args.orderedIds.map((id) => byId.get(id)).filter((f): f is FolderState => !!f);
+  for (const f of folders) {
+    if (!reordered.includes(f)) reordered.push(f);
+  }
+  folders.length = 0;
+  folders.push(...reordered);
+  persist();
+  return { ok: true, state: getState() };
+});
+
 ipcMain.handle('app:create-session', (_e, args: { folderId: string; command: string; shell?: ShellType }) => {
   const folder = findFolder(args.folderId);
   if (!folder) return { ok: false, error: 'Folder not found', state: getState() };
   const command = args.command.trim() || 'claude';
+  const shell = args.shell || folder.lastShell || defaultShell;
   folder.lastCommand = command;
-  folder.lastShell = args.shell;
+  folder.lastShell = shell;
   persist();
 
-  const result = createSessionForFolder(folder, command, args.shell);
+  const result = createSessionForFolder(folder, command, shell);
   if ('error' in result) return { ok: false, error: result.error, state: getState() };
 
   return { ok: true, state: getState(), sessionId: result.id };
@@ -451,8 +470,13 @@ ipcMain.handle('app:focus-session', (_e, args: { sessionId: string }) => {
 });
 
 ipcMain.handle('app:kill-session', (_e, args: { sessionId: string }) => {
-  const session = findSession(args.sessionId);
-  session?.kill();
+  for (const folder of folders) {
+    const idx = folder.sessions.findIndex((s) => s.id === args.sessionId);
+    if (idx < 0) continue;
+    folder.sessions[idx].kill();
+    folder.sessions.splice(idx, 1);
+    break;
+  }
   return { ok: true, state: getState() };
 });
 
@@ -521,6 +545,10 @@ ipcMain.handle('git:checkout-branch', (_e, args: { dirPath: string; branch: stri
   checkoutBranch(args.dirPath, args.branch)
 );
 
+ipcMain.handle('git:create-branch', (_e, args: { dirPath: string; name: string }) =>
+  createBranch(args.dirPath, args.name)
+);
+
 ipcMain.handle('git:pull', (_e, args: { dirPath: string }) => gitPull(args.dirPath));
 
 ipcMain.handle('git:push', (_e, args: { dirPath: string }) => gitPush(args.dirPath));
@@ -540,6 +568,24 @@ ipcMain.handle('git:diff', async (_e, args: { dirPath: string; relPath: string; 
 
 ipcMain.handle('git:commit', (_e, args: { dirPath: string; message: string }) => commitStaged(args.dirPath, args.message));
 
+ipcMain.handle(
+  'git:discard-file',
+  (
+    _e,
+    args: {
+      dirPath: string;
+      relPath: string;
+      worktreeStatus: GitFileStatusCode | null;
+      indexStatus: GitFileStatusCode | null;
+      origPath?: string;
+    }
+  ) => discardFile(args.dirPath, args.relPath, args.worktreeStatus, args.indexStatus, args.origPath)
+);
+
+ipcMain.handle('git:revert-hunk', (_e, args: { dirPath: string; relPath: string; patch: string; staged: boolean }) =>
+  revertHunk(args.dirPath, args.relPath, args.patch, args.staged)
+);
+
 ipcMain.handle('app:list-ide-matches', (_e, args: { dirPath: string }) => ({
   matches: findIdeMatches(args.dirPath, ideRules),
 }));
@@ -558,12 +604,13 @@ ipcMain.handle('app:launch-ide', (_e, args: { dirPath: string; ruleId: string; f
   return { ok: true };
 });
 
-ipcMain.handle('app:get-ide-rules', () => ({ rules: ideRules }));
+ipcMain.handle('app:get-ide-rules', () => ({ rules: ideRules, defaultShell }));
 
-ipcMain.handle('app:save-ide-rules', (_e, args: { rules: IdeRuleConfig[] }) => {
+ipcMain.handle('app:save-ide-rules', (_e, args: { rules: IdeRuleConfig[]; defaultShell?: ShellType }) => {
   ideRules = args.rules;
+  if (args.defaultShell) defaultShell = args.defaultShell;
   persist();
-  return { ok: true, rules: ideRules };
+  return { ok: true, rules: ideRules, defaultShell };
 });
 
 ipcMain.handle('app:get-info', () => ({

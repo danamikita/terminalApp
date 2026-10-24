@@ -34,6 +34,7 @@ export interface AppConfig {
   folders: FolderConfig[];
   autoResume?: boolean;
   ideRules?: IdeRuleConfig[];
+  defaultShell?: ShellType;
 }
 
 export interface SessionSnapshot {
@@ -60,6 +61,7 @@ export interface FolderSnapshot {
 export interface AppState {
   folders: FolderSnapshot[];
   autoResume: boolean;
+  defaultShell: ShellType;
 }
 
 export type GitInfo =

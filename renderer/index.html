@@ -149,6 +149,18 @@
     </div>
   </div>
 
+  <div id="branch-overlay" class="hidden">
+    <div id="branch-modal">
+      <div id="branch-title-bar">Create new branch</div>
+      <label class="feedback-label" for="branch-name">Branch name</label>
+      <input id="branch-name" type="text" placeholder="feature/my-branch" autocomplete="off" />
+      <div id="branch-buttons">
+        <button id="branch-cancel">Cancel</button>
+        <button id="branch-submit">Create</button>
+      </div>
+    </div>
+  </div>
+
   <div id="web-driver-overlay" class="hidden">
     <div id="web-driver-modal">
       <div id="web-driver-title-bar">Web Driver enabled</div>
@@ -168,7 +180,19 @@
 
   <div id="settings-overlay" class="hidden">
     <div id="settings-modal">
-      <div id="settings-title-bar">IDE launch rules</div>
+      <div id="settings-title-bar">Settings</div>
+
+      <label class="feedback-label" for="settings-default-shell">Default shell</label>
+      <select id="settings-default-shell">
+        <option value="cmd">Command Prompt</option>
+        <option value="powershell">PowerShell</option>
+        <option value="bash">Bash (Git Bash / WSL)</option>
+      </select>
+      <p class="feedback-note">
+        Used for new sessions when a folder has no shell of its own yet.
+      </p>
+
+      <div class="settings-title-bar">IDE launch rules</div>
       <p class="feedback-note">
         Each rule matches files/folders in a project and launches a command. Use <code>{file}</code> for the matched
         file's full path, or <code>{folder}</code> for the project folder's path. A command that's just

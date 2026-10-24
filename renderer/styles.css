@@ -129,6 +129,18 @@ html, body {
   background: #393e44;
 }
 
+.folder-row.dragging {
+  opacity: 0.4;
+}
+
+.folder-row.drag-over-top {
+  box-shadow: inset 0 2px 0 0 #4fa3ff;
+}
+
+.folder-row.drag-over-bottom {
+  box-shadow: inset 0 -2px 0 0 #4fa3ff;
+}
+
 .folder-arrow {
   width: 12px;
   color: #999;
@@ -791,6 +803,27 @@ html, body {
   white-space: nowrap;
 }
 
+.git-revert-file-btn {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: #999;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  visibility: hidden;
+}
+
+.git-change-row:hover .git-revert-file-btn {
+  visibility: visible;
+}
+
+.git-revert-file-btn:hover {
+  color: #f14c4c;
+  background: #3a1d1d;
+}
+
 .git-status-badge {
   width: 16px;
   text-align: center;
@@ -828,6 +861,50 @@ html, body {
   font-style: italic;
 }
 
+.git-diff-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.git-diff-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #333;
+  flex-shrink: 0;
+}
+
+.git-diff-toolbar-path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: #ccc;
+}
+
+.git-diff-revert-btn,
+.git-diff-revert-hunk-btn {
+  background: #3a3d3e;
+  color: #ddd;
+  border: none;
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.git-diff-revert-btn:hover,
+.git-diff-revert-hunk-btn:hover {
+  color: #f14c4c;
+  filter: brightness(1.15);
+}
+
 .git-diff-view {
   flex: 1;
   overflow: auto;
@@ -837,6 +914,19 @@ html, body {
   font-size: 12px;
   white-space: pre;
   color: #d4d4d4;
+}
+
+.git-diff-hunk-block {
+  margin-bottom: 8px;
+}
+
+.git-diff-hunk-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  white-space: normal;
+  padding: 2px 0;
 }
 
 .git-diff-add {
@@ -851,7 +941,6 @@ html, body {
 
 .git-diff-hunk {
   color: #4daafc;
-  display: block;
 }
 
 #modal-overlay {
@@ -1031,7 +1120,8 @@ html, body {
 }
 
 #session-shell,
-#session-command {
+#session-command,
+#settings-default-shell {
   width: 100%;
   padding: 6px 8px;
   background: #1e1e1e;
@@ -1252,6 +1342,72 @@ html, body {
   color: #fff;
 }
 
+#branch-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#branch-overlay.hidden {
+  display: none;
+}
+
+#branch-modal {
+  background: #2d2d30;
+  border: 1px solid #444;
+  border-radius: 6px;
+  padding: 18px;
+  width: 360px;
+  display: flex;
+  flex-direction: column;
+}
+
+#branch-title-bar {
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: #eee;
+}
+
+#branch-name {
+  width: 100%;
+  padding: 6px 8px;
+  background: #1e1e1e;
+  border: 1px solid #444;
+  color: #fff;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+#branch-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+#branch-buttons button {
+  padding: 6px 14px;
+  border-radius: 4px;
+  border: none;
+  cursor: pointer;
+  background: #3a3d3e;
+  color: #ddd;
+}
+
+#branch-buttons #branch-submit {
+  background: #0e639c;
+  color: #fff;
+}
+
+#branch-buttons button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 #commit-buttons #commit-submit:disabled {
   background: #555;
   color: #999;
@@ -1351,10 +1507,19 @@ html, body {
   flex-direction: column;
 }
 
-#settings-title-bar {
+#settings-title-bar,
+.settings-title-bar {
   font-weight: 600;
   margin-bottom: 10px;
   color: #eee;
+}
+
+.settings-title-bar {
+  margin-top: 16px;
+}
+
+#settings-default-shell {
+  margin-bottom: 4px;
 }
 
 #settings-rules-header,

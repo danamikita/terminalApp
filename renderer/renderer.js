@@ -53,6 +53,7 @@ const settingsRulesEl = document.getElementById('settings-rules');
 const settingsAddRuleBtn = document.getElementById('settings-add-rule');
 const settingsCancelBtn = document.getElementById('settings-cancel');
 const settingsSaveBtn = document.getElementById('settings-save');
+const settingsDefaultShellSelect = document.getElementById('settings-default-shell');
 
 const overlay = document.getElementById('modal-overlay');
 const modalLabel = document.getElementById('modal-label');
@@ -258,6 +259,7 @@ function renderSidebar() {
     const row = el('div', 'folder-row');
     row.dataset.testid = 'folder-row';
     row.dataset.folderId = folder.id;
+    row.draggable = true;
     const main = el('div', 'folder-main');
     main.appendChild(el('span', 'folder-arrow', isCollapsed ? '▸' : '▾'));
     main.appendChild(el('span', 'folder-icon', '📦'));
@@ -378,7 +380,7 @@ function renderSidebar() {
 
         const killBtn = el('button', 'row-btn', '✕');
         killBtn.dataset.testid = 'kill-session-btn';
-        killBtn.title = 'Kill session';
+        killBtn.title = 'Close session';
         killBtn.addEventListener('click', (ev) => {
           ev.stopPropagation();
           killSession(session.id);
@@ -391,6 +393,67 @@ function renderSidebar() {
     }
   }
 }
+
+// Drag-and-drop folder reordering. Listeners live on the (stable) list
+// container rather than per-row, since renderSidebar() rebuilds every row
+// on each render.
+let draggedFolderId = null;
+
+folderListEl.addEventListener('dragstart', (ev) => {
+  const row = ev.target.closest('[data-testid="folder-row"]');
+  if (!row) {
+    ev.preventDefault();
+    return;
+  }
+  draggedFolderId = row.dataset.folderId;
+  ev.dataTransfer.effectAllowed = 'move';
+  ev.dataTransfer.setData('text/plain', draggedFolderId);
+  requestAnimationFrame(() => row.classList.add('dragging'));
+});
+
+folderListEl.addEventListener('dragend', () => {
+  draggedFolderId = null;
+  for (const row of folderListEl.querySelectorAll('.folder-row')) {
+    row.classList.remove('dragging', 'drag-over-top', 'drag-over-bottom');
+  }
+});
+
+folderListEl.addEventListener('dragover', (ev) => {
+  if (!draggedFolderId) return;
+  const row = ev.target.closest('[data-testid="folder-row"]');
+  if (!row || row.dataset.folderId === draggedFolderId) return;
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = 'move';
+  const rect = row.getBoundingClientRect();
+  const before = ev.clientY < rect.top + rect.height / 2;
+  row.classList.toggle('drag-over-top', before);
+  row.classList.toggle('drag-over-bottom', !before);
+});
+
+folderListEl.addEventListener('dragleave', (ev) => {
+  const row = ev.target.closest('[data-testid="folder-row"]');
+  if (row) row.classList.remove('drag-over-top', 'drag-over-bottom');
+});
+
+folderListEl.addEventListener('drop', async (ev) => {
+  const row = ev.target.closest('[data-testid="folder-row"]');
+  if (!draggedFolderId || !row || row.dataset.folderId === draggedFolderId) return;
+  ev.preventDefault();
+  const before = row.classList.contains('drag-over-top');
+  row.classList.remove('drag-over-top', 'drag-over-bottom');
+
+  const ids = state.folders.map((f) => f.id);
+  const fromIdx = ids.indexOf(draggedFolderId);
+  if (fromIdx === -1) return;
+  ids.splice(fromIdx, 1);
+  let toIdx = ids.indexOf(row.dataset.folderId);
+  if (!before) toIdx += 1;
+  ids.splice(toIdx, 0, draggedFolderId);
+
+  const res = await ipcRenderer.invoke('app:reorder-folders', { orderedIds: ids });
+  state = res.state;
+  renderSidebar();
+});
 
 function applyLayout() {
   mainBodyEl.classList.toggle('split', splitMode);
@@ -657,7 +720,7 @@ const sessionCancelBtn = document.getElementById('session-cancel');
 const sessionStartBtn = document.getElementById('session-start');
 
 function promptNewSession(folder) {
-  sessionShellSelect.value = folder.lastShell || 'cmd';
+  sessionShellSelect.value = folder.lastShell || state.defaultShell || 'cmd';
   sessionCommandInput.value = folder.lastCommand || 'claude';
   sessionOverlay.classList.remove('hidden');
   sessionCommandInput.focus();
@@ -698,6 +761,19 @@ function promptNewSession(folder) {
 async function killSession(sessionId) {
   const res = await ipcRenderer.invoke('app:kill-session', { sessionId });
   state = res.state;
+
+  const entry = sessionTerms.get(sessionId);
+  if (entry) {
+    entry.term.dispose();
+    entry.container.remove();
+    sessionTerms.delete(sessionId);
+  }
+  if (activeSessionId === sessionId) {
+    activeSessionId = null;
+    if (singleModeShowing === 'session') singleModeShowing = 'placeholder';
+  }
+
+  applyLayout();
   renderSidebar();
 }
 
@@ -1026,6 +1102,7 @@ settingsBtn.addEventListener('click', async () => {
   const res = await ipcRenderer.invoke('app:get-ide-rules');
   editingIdeRules = (res.rules || []).map((r) => ({ ...r }));
   renderSettingsRules();
+  settingsDefaultShellSelect.value = res.defaultShell || 'cmd';
   settingsOverlay.classList.remove('hidden');
 });
 
@@ -1042,7 +1119,11 @@ settingsSaveBtn.addEventListener('click', async () => {
   const cleaned = editingIdeRules
     .map((r) => ({ ...r, label: r.label.trim(), match: r.match.trim(), command: r.command.trim() }))
     .filter((r) => r.label && r.command && (r.matchKind === 'always' || r.match));
-  await ipcRenderer.invoke('app:save-ide-rules', { rules: cleaned });
+  const res = await ipcRenderer.invoke('app:save-ide-rules', {
+    rules: cleaned,
+    defaultShell: settingsDefaultShellSelect.value,
+  });
+  if (state) state.defaultShell = res.defaultShell;
   settingsOverlay.classList.add('hidden');
   refreshIdeMatches();
 });

@@ -130,7 +130,9 @@ npm run dev
 - **＋ (folder row)** — start a new session in that folder (pick a shell, enter
   a command, defaults to `claude`)
 - **✕ (folder row)** — remove a folder (kills any running sessions in it)
-- **✎ / ✕ (session row)** — rename or kill that session
+- Drag a folder row by its name to reorder it in the sidebar
+- **✎ / ✕ (session row)** — rename that session, or close it (kills it if
+  still running and removes it from the list)
 - **⬓ Split view** — show the file browser and the active terminal side by side
 - **🔁 Auto-resume** — toggle whether sessions running at last close relaunch on startup
 - **🔄 Check for Updates** — check right now instead of waiting for the periodic check

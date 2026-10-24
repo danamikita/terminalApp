@@ -1,4 +1,4 @@
-let gitPanelState = null; // { folderId, branches, status, selectedFile, selectedStaged, selectedUntracked, selectedDiffText, busy, errorText }
+let gitPanelState = null; // { folderId, branches, status, selectedFile, selectedStaged, selectedUntracked, selectedConflicted, selectedChange, selectedDiffText, busy, errorText }
 
 const commitOverlay = document.getElementById('commit-overlay');
 const commitStagedCountEl = document.getElementById('commit-staged-count');
@@ -6,6 +6,12 @@ const commitMessageInput = document.getElementById('commit-message');
 const commitCancelBtn = document.getElementById('commit-cancel');
 const commitSubmitBtn = document.getElementById('commit-submit');
 let commitModalFolder = null;
+
+const branchOverlay = document.getElementById('branch-overlay');
+const branchNameInput = document.getElementById('branch-name');
+const branchCancelBtn = document.getElementById('branch-cancel');
+const branchSubmitBtn = document.getElementById('branch-submit');
+let branchModalFolder = null;
 
 async function openGitForFolder(folder) {
   filesPanelState = { folderId: folder.id, view: 'git' };
@@ -16,6 +22,8 @@ async function openGitForFolder(folder) {
     selectedFile: null,
     selectedStaged: false,
     selectedUntracked: false,
+    selectedConflicted: false,
+    selectedChange: null,
     selectedDiffText: null,
     busy: null,
     errorText: null,
@@ -41,6 +49,8 @@ async function refreshGitPanel(folder) {
     );
     if (!stillExists) {
       gitPanelState.selectedFile = null;
+      gitPanelState.selectedChange = null;
+      gitPanelState.selectedConflicted = false;
       gitPanelState.selectedDiffText = null;
     }
   }
@@ -68,6 +78,11 @@ function renderGitPanel(folder) {
   select.disabled = !!gitPanelState.busy;
   select.addEventListener('change', () => doCheckout(folder, select.value));
   header.appendChild(select);
+
+  const branchBtn = el('button', 'git-panel-btn', '+ Branch');
+  branchBtn.disabled = !!gitPanelState.busy;
+  branchBtn.addEventListener('click', () => openBranchModal(folder));
+  header.appendChild(branchBtn);
 
   const pullBtn = el('button', 'git-panel-btn', gitPanelState.busy === 'pull' ? 'Pulling…' : '⬇ Pull');
   pullBtn.disabled = !!gitPanelState.busy;
@@ -101,7 +116,7 @@ function renderGitPanel(folder) {
 
   const body = el('div', 'git-panel-body');
   body.appendChild(renderChangeList(folder));
-  body.appendChild(renderDiffView());
+  body.appendChild(renderDiffView(folder));
   gitPanelEl.appendChild(body);
 }
 
@@ -166,8 +181,40 @@ function renderChangeRow(folder, change) {
   }
 
   row.appendChild(el('span', 'git-change-path', change.path));
+
+  if (code !== 'conflicted') {
+    const revertBtn = el('button', 'git-revert-file-btn', '↺');
+    revertBtn.title = 'Discard changes to this file';
+    revertBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      revertChange(folder, change);
+    });
+    row.appendChild(revertBtn);
+  }
+
   row.addEventListener('click', () => selectChangeForDiff(folder, change));
   return row;
+}
+
+async function revertChange(folder, change) {
+  const ok = confirm(`Discard changes to "${change.path}"?\n\nThis cannot be undone.`);
+  if (!ok) return;
+  const res = await ipcRenderer.invoke('git:discard-file', {
+    dirPath: folder.path,
+    relPath: change.path,
+    worktreeStatus: change.worktreeStatus,
+    indexStatus: change.indexStatus,
+    origPath: change.origPath,
+  });
+  if (!res.ok) {
+    gitPanelState.errorText = res.error;
+  } else if (gitPanelState.selectedFile === change.path) {
+    gitPanelState.selectedFile = null;
+    gitPanelState.selectedChange = null;
+    gitPanelState.selectedDiffText = null;
+  }
+  await refreshGitPanel(folder);
+  refreshGitInfo();
 }
 
 async function toggleStage(folder, change) {
@@ -182,6 +229,8 @@ async function selectChangeForDiff(folder, change) {
   gitPanelState.selectedFile = change.path;
   gitPanelState.selectedStaged = change.staged;
   gitPanelState.selectedUntracked = change.worktreeStatus === 'untracked';
+  gitPanelState.selectedConflicted = change.worktreeStatus === 'conflicted' || change.indexStatus === 'conflicted';
+  gitPanelState.selectedChange = change;
   gitPanelState.selectedDiffText = null;
   renderGitPanel(folder);
 
@@ -196,26 +245,101 @@ async function selectChangeForDiff(folder, change) {
   renderGitPanel(folder);
 }
 
-function renderDiffView() {
-  const pre = document.createElement('pre');
-  pre.className = 'git-diff-view';
-  if (!gitPanelState.selectedFile) {
-    pre.textContent = 'Select a file to view its diff.';
-  } else if (gitPanelState.selectedDiffText === null) {
-    pre.textContent = 'Loading diff…';
-  } else if (gitPanelState.selectedDiffText === '') {
-    pre.textContent = '(no textual diff)';
-  } else {
-    for (const line of gitPanelState.selectedDiffText.split('\n')) {
-      const lineEl = document.createElement('span');
-      if (line.startsWith('+') && !line.startsWith('+++')) lineEl.className = 'git-diff-add';
-      else if (line.startsWith('-') && !line.startsWith('---')) lineEl.className = 'git-diff-del';
-      else if (line.startsWith('@@')) lineEl.className = 'git-diff-hunk';
-      lineEl.textContent = `${line}\n`;
-      pre.appendChild(lineEl);
+// Splits a single-file diff into its header lines (everything before the
+// first "@@" hunk marker) and a list of hunks, each carrying its own "@@"
+// line plus the +/- /context lines that follow it. Needed so a hunk can be
+// re-assembled with the header into a standalone patch for `git apply`.
+function parseDiffHunks(diffText) {
+  const lines = diffText.split('\n');
+  const firstHunk = lines.findIndex((l) => l.startsWith('@@'));
+  if (firstHunk === -1) return { header: lines, hunks: [] };
+  const header = lines.slice(0, firstHunk);
+  const hunks = [];
+  let current = null;
+  for (let i = firstHunk; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.startsWith('@@')) {
+      if (current) hunks.push(current);
+      current = { headerLine: line, lines: [] };
+    } else if (current) {
+      current.lines.push(line);
     }
   }
-  return pre;
+  if (current) hunks.push(current);
+  return { header, hunks };
+}
+
+function buildHunkPatch(header, hunk) {
+  const lines = [...header, hunk.headerLine, ...hunk.lines];
+  while (lines.length && lines[lines.length - 1] === '') lines.pop();
+  return `${lines.join('\n')}\n`;
+}
+
+function renderDiffView(folder) {
+  const wrap = el('div', 'git-diff-wrap');
+
+  if (gitPanelState.selectedFile) {
+    const toolbar = el('div', 'git-diff-toolbar');
+    toolbar.appendChild(el('span', 'git-diff-toolbar-path', gitPanelState.selectedFile));
+    if (!gitPanelState.selectedConflicted) {
+      const revertFileBtn = el('button', 'git-diff-revert-btn', '↺ Revert File');
+      revertFileBtn.addEventListener('click', () => revertChange(folder, gitPanelState.selectedChange));
+      toolbar.appendChild(revertFileBtn);
+    }
+    wrap.appendChild(toolbar);
+  }
+
+  const body = el('div', 'git-diff-view');
+
+  if (!gitPanelState.selectedFile) {
+    body.textContent = 'Select a file to view its diff.';
+  } else if (gitPanelState.selectedDiffText === null) {
+    body.textContent = 'Loading diff…';
+  } else if (gitPanelState.selectedDiffText === '') {
+    body.textContent = '(no textual diff)';
+  } else {
+    const { header, hunks } = parseDiffHunks(gitPanelState.selectedDiffText);
+    const canRevertHunks = !gitPanelState.selectedUntracked && !gitPanelState.selectedConflicted;
+    for (const hunk of hunks) {
+      const hunkBlock = el('div', 'git-diff-hunk-block');
+
+      const hunkHeaderRow = el('div', 'git-diff-hunk-header-row');
+      hunkHeaderRow.appendChild(el('span', 'git-diff-hunk', hunk.headerLine));
+      if (canRevertHunks) {
+        const revertHunkBtn = el('button', 'git-diff-revert-hunk-btn', '↺ Revert Hunk');
+        revertHunkBtn.addEventListener('click', () => doRevertHunk(folder, header, hunk));
+        hunkHeaderRow.appendChild(revertHunkBtn);
+      }
+      hunkBlock.appendChild(hunkHeaderRow);
+
+      for (const line of hunk.lines) {
+        const lineEl = document.createElement('span');
+        if (line.startsWith('+') && !line.startsWith('+++')) lineEl.className = 'git-diff-add';
+        else if (line.startsWith('-') && !line.startsWith('---')) lineEl.className = 'git-diff-del';
+        lineEl.textContent = `${line}\n`;
+        hunkBlock.appendChild(lineEl);
+      }
+      body.appendChild(hunkBlock);
+    }
+  }
+  wrap.appendChild(body);
+  return wrap;
+}
+
+async function doRevertHunk(folder, header, hunk) {
+  const patch = buildHunkPatch(header, hunk);
+  const relPath = gitPanelState.selectedFile;
+  const staged = gitPanelState.selectedStaged;
+  const res = await ipcRenderer.invoke('git:revert-hunk', { dirPath: folder.path, relPath, patch, staged });
+  if (!res.ok) {
+    gitPanelState.errorText = res.error;
+    renderGitPanel(folder);
+    return;
+  }
+  await refreshGitPanel(folder);
+  const stillThere = gitPanelState.status.changes.find((c) => c.path === relPath && c.staged === staged);
+  if (stillThere) await selectChangeForDiff(folder, stillThere);
+  refreshGitInfo();
 }
 
 async function doCheckout(folder, branch) {
@@ -297,6 +421,52 @@ commitSubmitBtn.addEventListener('click', async () => {
     return;
   }
   closeCommitModal();
+  await refreshGitPanel(folder);
+  refreshGitInfo();
+});
+
+function openBranchModal(folder) {
+  branchModalFolder = folder;
+  branchNameInput.value = '';
+  branchSubmitBtn.disabled = true;
+  branchOverlay.classList.remove('hidden');
+  branchNameInput.focus();
+}
+
+function closeBranchModal() {
+  branchOverlay.classList.add('hidden');
+  branchModalFolder = null;
+}
+
+branchNameInput.addEventListener('input', () => {
+  branchSubmitBtn.disabled = !branchNameInput.value.trim();
+});
+
+branchCancelBtn.addEventListener('click', () => closeBranchModal());
+
+branchOverlay.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape') closeBranchModal();
+  if (ev.key === 'Enter' && !branchSubmitBtn.disabled) branchSubmitBtn.click();
+});
+
+branchSubmitBtn.addEventListener('click', async () => {
+  const folder = branchModalFolder;
+  if (!folder) return;
+  const name = branchNameInput.value.trim();
+  if (!name) return;
+  branchSubmitBtn.disabled = true;
+  const res = await ipcRenderer.invoke('git:create-branch', { dirPath: folder.path, name });
+  branchSubmitBtn.disabled = false;
+  if (!res.ok) {
+    closeBranchModal();
+    gitPanelState.errorText = res.error;
+    renderGitPanel(folder);
+    return;
+  }
+  closeBranchModal();
+  gitPanelState.selectedFile = null;
+  gitPanelState.selectedChange = null;
+  gitPanelState.selectedDiffText = null;
   await refreshGitPanel(folder);
   refreshGitInfo();
 });
