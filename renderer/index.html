@@ -171,6 +171,7 @@
       </p>
       <label class="feedback-label" for="web-driver-url">Driver URL</label>
       <input id="web-driver-url" type="text" readonly />
+      <p id="web-driver-local-hint" class="feedback-note hidden"></p>
       <div id="web-driver-buttons">
         <button id="web-driver-copy">📋 Copy to clipboard</button>
         <button id="web-driver-close">Close</button>
@@ -208,6 +209,20 @@
       </div>
       <div id="settings-rules"></div>
       <button id="settings-add-rule">+ Add rule</button>
+
+      <div class="settings-title-bar">Trusted devices</div>
+      <p class="feedback-note">
+        Devices that completed pairing from the web driver page can control sessions without re-entering the
+        token. Revoking a device blocks it immediately.
+      </p>
+      <div id="settings-devices-header">
+        <span>Name</span>
+        <span>Paired</span>
+        <span>Last seen</span>
+        <span></span>
+      </div>
+      <div id="settings-devices"></div>
+
       <div id="settings-buttons">
         <button id="settings-cancel">Cancel</button>
         <button id="settings-save">Save</button>

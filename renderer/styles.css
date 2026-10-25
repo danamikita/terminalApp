@@ -1575,6 +1575,50 @@ html, body {
   color: #fff;
 }
 
+#settings-devices-header,
+.settings-device-row {
+  display: grid;
+  grid-template-columns: 1fr 140px 140px 24px;
+  gap: 6px;
+  align-items: center;
+}
+
+#settings-devices-header {
+  font-size: 11px;
+  color: #888;
+  padding: 0 2px 4px;
+}
+
+#settings-devices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 25vh;
+  overflow-y: auto;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: #ddd;
+}
+
+.settings-devices-empty {
+  color: #888;
+  font-size: 13px;
+  padding: 6px 0;
+}
+
+.settings-device-revoke {
+  background: transparent;
+  border: none;
+  color: #999;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 4px;
+}
+
+.settings-device-revoke:hover {
+  color: #fff;
+}
+
 #settings-add-rule {
   align-self: flex-start;
   background: #3a3d3e;

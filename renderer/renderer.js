@@ -46,6 +46,7 @@ const webDriverCopyBtn = document.getElementById('web-driver-copy');
 const webDriverCloseBtn = document.getElementById('web-driver-close');
 const webDriverBanner = document.getElementById('web-driver-banner');
 const webDriverBannerOffBtn = document.getElementById('web-driver-banner-off');
+const webDriverLocalHint = document.getElementById('web-driver-local-hint');
 
 const settingsBtn = document.getElementById('settings-btn');
 const settingsOverlay = document.getElementById('settings-overlay');
@@ -54,6 +55,7 @@ const settingsAddRuleBtn = document.getElementById('settings-add-rule');
 const settingsCancelBtn = document.getElementById('settings-cancel');
 const settingsSaveBtn = document.getElementById('settings-save');
 const settingsDefaultShellSelect = document.getElementById('settings-default-shell');
+const settingsDevicesEl = document.getElementById('settings-devices');
 
 const overlay = document.getElementById('modal-overlay');
 const modalLabel = document.getElementById('modal-label');
@@ -1017,6 +1019,14 @@ async function setWebDriverEnabled(enabled) {
     const host = res.lanAddress || '127.0.0.1';
     webDriverUrlInput.value = `http://${host}:${res.port}/?token=${res.token}`;
     webDriverCopyBtn.textContent = '📋 Copy to clipboard';
+    if (res.hostname) {
+      webDriverLocalHint.textContent =
+        `Or, if your phone resolves mDNS names: http://${res.hostname}.local:${res.port}/?token=${res.token} ` +
+        `(best effort — not guaranteed on every network/device).`;
+      webDriverLocalHint.classList.remove('hidden');
+    } else {
+      webDriverLocalHint.classList.add('hidden');
+    }
     webDriverOverlay.classList.remove('hidden');
   }
 }
@@ -1098,11 +1108,46 @@ function renderSettingsRules() {
   }
 }
 
+let trustedDevicesList = [];
+
+function formatTimestamp(ms) {
+  if (!ms) return '—';
+  return new Date(ms).toLocaleString();
+}
+
+function renderSettingsDevices() {
+  settingsDevicesEl.innerHTML = '';
+  if (trustedDevicesList.length === 0) {
+    settingsDevicesEl.appendChild(el('div', 'settings-devices-empty', 'No paired devices yet.'));
+    return;
+  }
+  for (const device of trustedDevicesList) {
+    const row = el('div', 'settings-device-row');
+    row.appendChild(el('span', '', device.name));
+    row.appendChild(el('span', '', formatTimestamp(device.pairedAt)));
+    row.appendChild(el('span', '', formatTimestamp(device.lastSeenAt)));
+
+    const revokeBtn = el('button', 'settings-device-revoke', '✕');
+    revokeBtn.title = 'Revoke';
+    revokeBtn.addEventListener('click', async () => {
+      const res = await ipcRenderer.invoke('app:revoke-trusted-device', { id: device.id });
+      trustedDevicesList = res.devices || [];
+      renderSettingsDevices();
+    });
+    row.appendChild(revokeBtn);
+
+    settingsDevicesEl.appendChild(row);
+  }
+}
+
 settingsBtn.addEventListener('click', async () => {
   const res = await ipcRenderer.invoke('app:get-ide-rules');
   editingIdeRules = (res.rules || []).map((r) => ({ ...r }));
   renderSettingsRules();
   settingsDefaultShellSelect.value = res.defaultShell || 'cmd';
+  const devicesRes = await ipcRenderer.invoke('app:get-trusted-devices');
+  trustedDevicesList = devicesRes.devices || [];
+  renderSettingsDevices();
   settingsOverlay.classList.remove('hidden');
 });
 

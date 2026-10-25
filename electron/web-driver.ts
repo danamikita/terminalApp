@@ -14,13 +14,29 @@
 // boundary, is what gates access. Anyone with the token can type into any
 // of your running shell sessions, same as sitting at the keyboard — treat
 // it like a credential for as long as the driver is on.
+//
+// Device pairing: POST /pair (ephemeral-token-only — see its handler below)
+// trades that per-launch token for a persistent per-device credential, so a
+// phone doesn't need to be told the token again on every visit. The
+// credential travels as "device.<id>.<secret>" in the exact same slots as
+// the ephemeral token (no new headers/params, no CORS allowlist change). A
+// paired device can never itself pair new devices — only the raw ephemeral
+// token works against /pair — so a compromised device credential can't
+// silently mint siblings. Device secrets are persisted in plaintext in
+// config.json, same as every other setting in AppConfig; that's not a new
+// weakness, just worth being explicit that pairing adds no extra at-rest
+// protection. The LAN mDNS advertisement below broadcasts only the
+// hostname — never a token or device secret — since mDNS multicast is
+// unauthenticated and visible to anything on the LAN, not just the intended
+// phone.
 import * as http from 'http';
 import type { IncomingMessage, ServerResponse } from 'http';
-import { randomUUID } from 'crypto';
+import { randomUUID, randomBytes, timingSafeEqual, createHash } from 'crypto';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
-import type { AppState } from '../src/types';
+import Bonjour from 'bonjour-service';
+import type { AppState, TrustedDevice } from '../src/types';
 
 // Interface names that are virtual/VPN adapters rather than the NIC a phone
 // on the same Wi-Fi can actually reach — e.g. Tailscale assigns a CGNAT
@@ -58,6 +74,9 @@ export interface WebDriverDeps {
   subscribeSessionData: (sessionId: string, cb: (data: string) => void) => (() => void) | null;
   writeToSession: (sessionId: string, data: string) => boolean;
   resizeSession: (sessionId: string, cols: number, rows: number) => boolean;
+  listTrustedDevices: () => TrustedDevice[];
+  addTrustedDevice: (device: TrustedDevice) => void;
+  touchTrustedDevice: (deviceId: string) => void;
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -69,6 +88,31 @@ function readBody(req: IncomingMessage): Promise<string> {
     req.on('end', () => resolve(data));
     req.on('error', reject);
   });
+}
+
+// Hashes both sides to a fixed-length digest before comparing so
+// timingSafeEqual never throws on the differing lengths of the ephemeral
+// UUID token vs. a 64-char hex device secret.
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const ha = createHash('sha256').update(a).digest();
+  const hb = createHash('sha256').update(b).digest();
+  return timingSafeEqual(ha, hb);
+}
+
+const DEVICE_TOKEN = /^device\.([^.]+)\.([0-9a-f]{64})$/;
+
+function verifyCredential(
+  supplied: string | undefined,
+  ephemeralToken: string,
+  deps: WebDriverDeps
+): { ok: boolean; deviceId?: string } {
+  if (!supplied) return { ok: false };
+  if (timingSafeEqualStr(supplied, ephemeralToken)) return { ok: true };
+  const match = DEVICE_TOKEN.exec(supplied);
+  if (!match) return { ok: false };
+  const device = deps.listTrustedDevices().find((d) => d.id === match[1]);
+  if (!device || !timingSafeEqualStr(match[2], device.secret)) return { ok: false };
+  return { ok: true, deviceId: device.id };
 }
 
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
@@ -171,7 +215,56 @@ function controlPage(): string {
   <script src="/vendor/xterm.js"></script>
   <script src="/vendor/addon-fit.js"></script>
   <script>
-    const token = new URLSearchParams(location.search).get('token') || prompt('Driver token:');
+    const DEVICE_STORAGE_KEY = 'terminalapp_device_credential';
+    let deviceCred = null;
+    try {
+      deviceCred = JSON.parse(localStorage.getItem(DEVICE_STORAGE_KEY) || 'null');
+    } catch (e) {
+      deviceCred = null;
+    }
+    let ephemeralToken = new URLSearchParams(location.search).get('token');
+    let pairingOffered = false;
+
+    function currentAuthValue() {
+      if (deviceCred) return 'device.' + deviceCred.id + '.' + deviceCred.secret;
+      return ephemeralToken;
+    }
+
+    function forgetDeviceCredential() {
+      deviceCred = null;
+      try {
+        localStorage.removeItem(DEVICE_STORAGE_KEY);
+      } catch (e) {
+        // best-effort
+      }
+    }
+
+    async function ensureAuthed() {
+      while (!currentAuthValue()) {
+        ephemeralToken = prompt('Driver token:') || '';
+      }
+    }
+
+    async function maybeOfferPairing() {
+      if (pairingOffered || deviceCred || !ephemeralToken) return;
+      pairingOffered = true;
+      const name = prompt('Remember this device so you are not asked for the token again? Enter a name, or Cancel to skip:', 'My phone');
+      if (!name) return;
+      try {
+        const res = await fetch('/pair', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Driver-Token': ephemeralToken },
+          body: JSON.stringify({ name: name }),
+        });
+        if (!res.ok) return;
+        const paired = await res.json();
+        deviceCred = { id: paired.deviceId, secret: paired.deviceSecret };
+        localStorage.setItem(DEVICE_STORAGE_KEY, JSON.stringify(deviceCred));
+      } catch (e) {
+        // best-effort — staying on the ephemeral token for this visit is fine
+      }
+    }
+
     const windowsBuildNumber = ${JSON.stringify(Number(os.release().split('.')[2]) || 0)};
     const statusEl = document.getElementById('status');
     const foldersEl = document.getElementById('folders');
@@ -182,8 +275,15 @@ function controlPage(): string {
 
     function authedFetch(url, opts) {
       opts = opts || {};
-      opts.headers = Object.assign({}, opts.headers, { 'X-Driver-Token': token });
-      return fetch(url, opts);
+      opts.headers = Object.assign({}, opts.headers, { 'X-Driver-Token': currentAuthValue() });
+      return fetch(url, opts).then((res) => {
+        if (res.status === 401) {
+          forgetDeviceCredential();
+          ephemeralToken = null;
+          location.reload();
+        }
+        return res;
+      });
     }
 
     function statusDotClass(session) {
@@ -199,6 +299,7 @@ function controlPage(): string {
         const state = await res.json();
         renderList(state);
         statusEl.textContent = 'connected';
+        maybeOfferPairing();
       } catch (e) {
         statusEl.textContent = 'could not reach the app — retrying…';
       }
@@ -323,7 +424,7 @@ function controlPage(): string {
 
       await sendResize();
 
-      eventSource = new EventSource('/session/' + sessionId + '/stream?token=' + encodeURIComponent(token));
+      eventSource = new EventSource('/session/' + sessionId + '/stream?token=' + encodeURIComponent(currentAuthValue()));
       eventSource.onmessage = (ev) => {
         term.write(JSON.parse(ev.data));
       };
@@ -374,7 +475,7 @@ function controlPage(): string {
     }
 
     window.addEventListener('hashchange', route);
-    route();
+    ensureAuthed().then(route);
   </script>
 </body>
 </html>`;
@@ -427,17 +528,53 @@ export function startWebDriver(deps: WebDriverDeps, port: number): Promise<WebDr
         return;
       }
 
-      // Everything below requires the token. EventSource can't set headers,
-      // so the stream route accepts it as a query param instead.
-      const sessionMatch = /^\/session\/([^/]+)\/(buffer|stream|input|resize)$/.exec(pathname);
-      const isStream = sessionMatch && sessionMatch[2] === 'stream';
-      const suppliedToken = isStream ? query.get('token') : req.headers['x-driver-token'];
-
-      if (pathname === '/sessions' || sessionMatch) {
-        if (suppliedToken !== token) {
+      // Pairing is deliberately excluded from the generic credential check
+      // below: it only ever accepts the raw ephemeral token, never a
+      // device.<id>.<secret> credential, so an already-paired device can
+      // never silently mint sibling devices.
+      if (req.method === 'POST' && pathname === '/pair') {
+        const suppliedToken = (req.headers['x-driver-token'] as string) || '';
+        if (!timingSafeEqualStr(suppliedToken, token)) {
           sendJson(res, 401, { ok: false, error: 'bad or missing driver token' });
           return;
         }
+        readBody(req)
+          .then((body) => {
+            let parsed: { name?: string };
+            try {
+              parsed = JSON.parse(body);
+            } catch {
+              parsed = {};
+            }
+            const name = (parsed.name || 'Unnamed device').toString().trim().slice(0, 60) || 'Unnamed device';
+            const device: TrustedDevice = {
+              id: randomUUID(),
+              secret: randomBytes(32).toString('hex'),
+              name,
+              pairedAt: Date.now(),
+              lastSeenAt: Date.now(),
+            };
+            deps.addTrustedDevice(device);
+            sendJson(res, 200, { deviceId: device.id, deviceSecret: device.secret });
+          })
+          .catch((e) => sendJson(res, 500, { ok: false, error: (e as Error).message }));
+        return;
+      }
+
+      // Everything below requires the token (ephemeral, or a paired
+      // device's persistent credential). EventSource can't set headers, so
+      // the stream route accepts it as a query param instead.
+      const sessionMatch = /^\/session\/([^/]+)\/(buffer|stream|input|resize)$/.exec(pathname);
+      const isStream = sessionMatch && sessionMatch[2] === 'stream';
+      const suppliedToken = isStream ? query.get('token') || undefined : (req.headers['x-driver-token'] as string | undefined);
+
+      if (pathname === '/sessions' || sessionMatch) {
+        const auth = verifyCredential(suppliedToken, token, deps);
+        if (!auth.ok) {
+          sendJson(res, 401, { ok: false, error: 'bad or missing driver token' });
+          return;
+        }
+        if (auth.deviceId) deps.touchTrustedDevice(auth.deviceId);
       } else {
         sendJson(res, 404, { ok: false, error: 'not found' });
         return;
@@ -530,13 +667,32 @@ export function startWebDriver(deps: WebDriverDeps, port: number): Promise<WebDr
       sendJson(res, 404, { ok: false, error: 'not found' });
     });
 
+    const bonjour = new Bonjour();
+
     server.once('error', reject);
     server.listen(port, '0.0.0.0', () => {
       server.removeListener('error', reject);
+      // TXT carries only the hostname — never the token or a device
+      // secret — since mDNS multicast is unauthenticated and visible to
+      // anything on the LAN, not just the intended phone.
+      bonjour.publish({
+        name: `terminalApp on ${os.hostname()}`,
+        type: 'terminalapp',
+        protocol: 'tcp',
+        port,
+        txt: { hostname: os.hostname() },
+      });
       resolve({
         port,
         token,
-        stop: () => new Promise((r) => server.close(() => r())),
+        stop: () =>
+          new Promise((r) => {
+            bonjour.unpublishAll(() => {
+              bonjour.destroy(() => {
+                server.close(() => r());
+              });
+            });
+          }),
       });
     });
   });

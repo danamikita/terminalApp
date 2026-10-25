@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { execFileSync, exec } from 'child_process';
 import { loadConfig, saveConfig, makeFolder, setConfigDirName } from '../src/config';
-import { AppState, FolderConfig, FolderSnapshot, GitFileStatusCode, IdeRuleConfig, ShellType } from '../src/types';
+import { AppState, FolderConfig, FolderSnapshot, GitFileStatusCode, IdeRuleConfig, ShellType, TrustedDevice } from '../src/types';
 import { PtySession } from '../src/pty-session';
 import { findIdeMatches, buildLaunchPlan, defaultIdeRules } from '../src/ide-rules';
 import {
@@ -46,6 +46,8 @@ const folders: FolderState[] = config.folders.map((f) => ({ ...f, sessions: [], 
 let autoResumeEnabled = isTestMode ? false : config.autoResume !== false;
 let ideRules: IdeRuleConfig[] = config.ideRules && config.ideRules.length > 0 ? config.ideRules : defaultIdeRules();
 let defaultShell: ShellType = config.defaultShell || 'cmd';
+let trustedDevices: TrustedDevice[] = config.trustedDevices || [];
+let lastSeenFlushTimer: NodeJS.Timeout | null = null;
 
 let win: BrowserWindow | null = null;
 let activeClone: { cancel: () => void } | null = null;
@@ -64,7 +66,24 @@ function persist(): void {
     autoResume: autoResumeEnabled,
     ideRules,
     defaultShell,
+    trustedDevices,
   });
+}
+
+// Every authenticated web-driver request from a paired device touches
+// lastSeenAt — persisting on every one would mean a full config.json
+// rewrite per keystroke, so updates are batched and flushed at most every
+// 30s (and on quit, see the before-quit handler below).
+function touchTrustedDevice(deviceId: string): void {
+  const device = trustedDevices.find((d) => d.id === deviceId);
+  if (!device) return;
+  device.lastSeenAt = Date.now();
+  if (!lastSeenFlushTimer) {
+    lastSeenFlushTimer = setTimeout(() => {
+      lastSeenFlushTimer = null;
+      persist();
+    }, 30_000);
+  }
 }
 
 function findFolder(folderId: string): FolderState | undefined {
@@ -326,6 +345,11 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   webDriver?.stop();
+  if (lastSeenFlushTimer) {
+    clearTimeout(lastSeenFlushTimer);
+    lastSeenFlushTimer = null;
+    persist();
+  }
 });
 
 ipcMain.handle('app:get-state', () => getState());
@@ -633,7 +657,14 @@ ipcMain.handle('app:toggle-web-driver', async (_e, args: { enabled: boolean }) =
     return { ok: true, enabled: false };
   }
   if (webDriver) {
-    return { ok: true, enabled: true, port: webDriver.port, token: webDriver.token, lanAddress: getLanAddress() };
+    return {
+      ok: true,
+      enabled: true,
+      port: webDriver.port,
+      token: webDriver.token,
+      lanAddress: getLanAddress(),
+      hostname: os.hostname(),
+    };
   }
   try {
     webDriver = await startWebDriver(
@@ -653,13 +684,34 @@ ipcMain.handle('app:toggle-web-driver', async (_e, args: { enabled: boolean }) =
           s.resize(cols, rows);
           return true;
         },
+        listTrustedDevices: () => trustedDevices,
+        addTrustedDevice: (device) => {
+          trustedDevices.push(device);
+          persist();
+        },
+        touchTrustedDevice,
       },
       WEB_DRIVER_PORT
     );
-    return { ok: true, enabled: true, port: webDriver.port, token: webDriver.token, lanAddress: getLanAddress() };
+    return {
+      ok: true,
+      enabled: true,
+      port: webDriver.port,
+      token: webDriver.token,
+      lanAddress: getLanAddress(),
+      hostname: os.hostname(),
+    };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+});
+
+ipcMain.handle('app:get-trusted-devices', () => ({ devices: trustedDevices }));
+
+ipcMain.handle('app:revoke-trusted-device', (_e, args: { id: string }) => {
+  trustedDevices = trustedDevices.filter((d) => d.id !== args.id);
+  persist();
+  return { ok: true, devices: trustedDevices };
 });
 
 ipcMain.handle('app:check-for-updates', async () => {

@@ -30,11 +30,20 @@ export interface IdeRuleConfig {
   command: string;
 }
 
+export interface TrustedDevice {
+  id: string;
+  secret: string;
+  name: string;
+  pairedAt: number;
+  lastSeenAt: number;
+}
+
 export interface AppConfig {
   folders: FolderConfig[];
   autoResume?: boolean;
   ideRules?: IdeRuleConfig[];
   defaultShell?: ShellType;
+  trustedDevices?: TrustedDevice[];
 }
 
 export interface SessionSnapshot {
