@@ -34,3 +34,40 @@ jobs:
         run: npx electron-builder --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v4
+
+      # Decodes the release keystore from a repo secret into a runner-local
+      # file — never written to the repo. See
+      # C:\Users\Dana\.android-keystores\README.txt (local machine, not
+      # checked in) for the keystore itself and these exact secret values.
+      - name: Decode Android keystore
+        shell: pwsh
+        run: |
+          $bytes = [Convert]::FromBase64String("${{ secrets.ANDROID_KEYSTORE_BASE64 }}")
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\release.jks", $bytes)
+
+      - name: Build signed Android APK
+        working-directory: android
+        shell: pwsh
+        run: .\gradlew.bat assembleRelease --console=plain
+        env:
+          ANDROID_VERSION_NAME: ${{ github.ref_name }}
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}\release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Upload Android APK to release
+        shell: pwsh
+        run: |
+          $dest = "FoldersRemote-${{ github.ref_name }}.apk"
+          Copy-Item "android\app\build\outputs\apk\release\app-release.apk" $dest
+          gh release upload "${{ github.ref_name }}" $dest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

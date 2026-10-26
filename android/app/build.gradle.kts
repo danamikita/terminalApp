@@ -4,6 +4,19 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// Keeps the Android app's version in lockstep with the desktop app's: CI
+// passes the same "vX.Y.Z" tag that already triggers the desktop release
+// build (see .github/workflows/release.yml), so one `npm version patch` +
+// push produces matching version numbers on both. versionCode must strictly
+// increase for Android to allow installing an update over an existing
+// copy — encoding major/minor/patch into one integer does that as long as
+// each part stays under 100, which plain semver patch/minor bumps satisfy.
+val releaseVersionName = (System.getenv("ANDROID_VERSION_NAME") ?: "0.1.0").removePrefix("v")
+val (verMajor, verMinor, verPatch) = releaseVersionName.split(".")
+    .map { it.toIntOrNull() ?: 0 }
+    .let { Triple(it.getOrElse(0) { 0 }, it.getOrElse(1) { 0 }, it.getOrElse(2) { 0 }) }
+val releaseVersionCode = verMajor * 10000 + verMinor * 100 + verPatch
+
 android {
     namespace = "com.danamikita.terminalapp.mobile"
     compileSdk = 36
@@ -12,13 +25,28 @@ android {
         applicationId = "com.danamikita.terminalapp.mobile"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = releaseVersionCode
+        versionName = releaseVersionName
+    }
+
+    signingConfigs {
+        create("release") {
+            val keystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
+            if (keystorePath != null) {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (System.getenv("ANDROID_KEYSTORE_PATH") != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
