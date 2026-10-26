@@ -47,6 +47,7 @@ const webDriverCloseBtn = document.getElementById('web-driver-close');
 const webDriverBanner = document.getElementById('web-driver-banner');
 const webDriverBannerOffBtn = document.getElementById('web-driver-banner-off');
 const webDriverLocalHint = document.getElementById('web-driver-local-hint');
+const webDriverTailscaleHint = document.getElementById('web-driver-tailscale-hint');
 const webDriverFixFirewallBtn = document.getElementById('web-driver-fix-firewall');
 
 const settingsBtn = document.getElementById('settings-btn');
@@ -1027,6 +1028,15 @@ async function setWebDriverEnabled(enabled) {
       webDriverLocalHint.classList.remove('hidden');
     } else {
       webDriverLocalHint.classList.add('hidden');
+    }
+    const tailscaleHost = res.tailscaleDnsName || res.tailscaleAddress;
+    if (tailscaleHost) {
+      webDriverTailscaleHint.textContent =
+        `Or, from outside this network via Tailscale: http://${tailscaleHost}:${res.port}/?token=${res.token} ` +
+        `— worth saving once in the Android app's "Paired" list so you never need to re-copy it.`;
+      webDriverTailscaleHint.classList.remove('hidden');
+    } else {
+      webDriverTailscaleHint.classList.add('hidden');
     }
     webDriverOverlay.classList.remove('hidden');
   }

@@ -24,7 +24,7 @@ import {
   commitStaged,
   cloneRepo,
 } from '../src/git';
-import { startWebDriver, getLanAddress, WebDriverHandle } from './web-driver';
+import { startWebDriver, getLanAddress, getTailscaleAddress, getTailscaleMagicDnsName, WebDriverHandle } from './web-driver';
 
 interface FolderState extends FolderConfig {
   sessions: PtySession[];
@@ -663,6 +663,8 @@ ipcMain.handle('app:toggle-web-driver', async (_e, args: { enabled: boolean }) =
       port: webDriver.port,
       token: webDriver.token,
       lanAddress: getLanAddress(),
+      tailscaleAddress: getTailscaleAddress(),
+      tailscaleDnsName: await getTailscaleMagicDnsName(),
       hostname: os.hostname(),
     };
   }
@@ -699,6 +701,8 @@ ipcMain.handle('app:toggle-web-driver', async (_e, args: { enabled: boolean }) =
       port: webDriver.port,
       token: webDriver.token,
       lanAddress: getLanAddress(),
+      tailscaleAddress: getTailscaleAddress(),
+      tailscaleDnsName: await getTailscaleMagicDnsName(),
       hostname: os.hostname(),
     };
   } catch (e) {

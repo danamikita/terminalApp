@@ -35,6 +35,7 @@ import { randomUUID, randomBytes, timingSafeEqual, createHash } from 'crypto';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
+import { execFile } from 'child_process';
 import Bonjour from 'bonjour-service';
 import type { AppState, TrustedDevice } from '../src/types';
 
@@ -60,6 +61,61 @@ export function getLanAddress(): string | null {
   const physical = candidates.filter((c) => !VIRTUAL_ADAPTER_NAME.test(c.name));
   const preferred = physical.find((c) => PHYSICAL_ADAPTER_NAME.test(c.name)) || physical[0];
   return (preferred || candidates[0]).address;
+}
+
+// Tailscale always assigns its IPv4 address from this CGNAT range — that's
+// a hard product guarantee, not configurable — so it's the only reliable
+// signal. The adapter being named "Tailscale" is not enough by itself: a
+// present-but-not-actually-connected Tailscale adapter (daemon not
+// running/logged out) can still show up with a useless 169.254.x.x
+// link-local fallback address, which would be confusing to show as if it
+// were a usable remote address.
+function isTailscaleCgnatAddress(address: string): boolean {
+  const parts = address.split('.').map(Number);
+  if (parts.length !== 4 || parts.some((n) => Number.isNaN(n))) return false;
+  return parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127;
+}
+
+// Unlike getLanAddress() above (which deliberately excludes this), a
+// Tailscale address is exactly what you want when connecting from outside
+// the LAN — it's routable to any device on the same tailnet regardless of
+// network. The web driver already listens on 0.0.0.0, so no server changes
+// are needed to make this reachable; this only surfaces the address in the
+// UI (see android plan's Tailscale follow-up). Returns null if Tailscale
+// isn't installed, or is installed but not actually connected.
+export function getTailscaleAddress(): string | null {
+  const nets = os.networkInterfaces();
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name] || []) {
+      if (net.family === 'IPv4' && !net.internal && isTailscaleCgnatAddress(net.address)) return net.address;
+    }
+  }
+  return null;
+}
+
+// Tailscale's MagicDNS name (e.g. "my-pc.tailnet-name.ts.net") is nicer to
+// type once than a raw 100.x.y.z address and — unlike a plain LAN IP —
+// reliably resolves from anywhere on the tailnet, not just this machine's
+// current network. Shells out to the `tailscale` CLI since there's no other
+// way to ask for this; best-effort only, resolves to null on any failure
+// (not installed, not on PATH, not logged in, timeout, unexpected output)
+// rather than rejecting — this is a convenience hint, never load-bearing.
+export function getTailscaleMagicDnsName(): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile('tailscale', ['status', '--json'], { timeout: 3000 }, (err, stdout) => {
+      if (err) {
+        resolve(null);
+        return;
+      }
+      try {
+        const parsed = JSON.parse(stdout);
+        const dnsName: string | undefined = parsed?.Self?.DNSName;
+        resolve(dnsName ? dnsName.replace(/\.$/, '') : null);
+      } catch {
+        resolve(null);
+      }
+    });
+  });
 }
 
 export interface WebDriverHandle {
