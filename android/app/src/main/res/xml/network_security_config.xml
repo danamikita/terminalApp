@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  This app only ever talks to a terminalApp desktop instance on the local
+  network over plain http:// (discovered via mDNS or entered manually), so
+  cleartext traffic is allowed for all destinations. There's no fixed
+  hostname to scope this to — the target IP/hostname is whatever the user
+  connects to at runtime.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

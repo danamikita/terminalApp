@@ -47,6 +47,7 @@ const webDriverCloseBtn = document.getElementById('web-driver-close');
 const webDriverBanner = document.getElementById('web-driver-banner');
 const webDriverBannerOffBtn = document.getElementById('web-driver-banner-off');
 const webDriverLocalHint = document.getElementById('web-driver-local-hint');
+const webDriverFixFirewallBtn = document.getElementById('web-driver-fix-firewall');
 
 const settingsBtn = document.getElementById('settings-btn');
 const settingsOverlay = document.getElementById('settings-overlay');
@@ -1044,6 +1045,19 @@ webDriverCopyBtn.addEventListener('click', () => {
 
 webDriverCloseBtn.addEventListener('click', () => {
   webDriverOverlay.classList.add('hidden');
+});
+
+webDriverFixFirewallBtn.addEventListener('click', async () => {
+  webDriverFixFirewallBtn.disabled = true;
+  webDriverFixFirewallBtn.textContent = '🛡️ Waiting for admin approval…';
+  const res = await ipcRenderer.invoke('app:add-firewall-rule');
+  if (res.ok) {
+    webDriverFixFirewallBtn.textContent = '✓ Allowed';
+  } else {
+    webDriverFixFirewallBtn.disabled = false;
+    webDriverFixFirewallBtn.textContent = '🛡️ Allow network discovery';
+    alert(`Could not update the firewall: ${res.error}`);
+  }
 });
 
 let editingIdeRules = [];

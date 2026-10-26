@@ -3,7 +3,7 @@ import { autoUpdater } from 'electron-updater';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import { execFileSync, exec } from 'child_process';
+import { execFileSync, execFile, exec } from 'child_process';
 import { loadConfig, saveConfig, makeFolder, setConfigDirName } from '../src/config';
 import { AppState, FolderConfig, FolderSnapshot, GitFileStatusCode, IdeRuleConfig, ShellType, TrustedDevice } from '../src/types';
 import { PtySession } from '../src/pty-session';
@@ -704,6 +704,53 @@ ipcMain.handle('app:toggle-web-driver', async (_e, args: { enabled: boolean }) =
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }
+});
+
+// Public Wi-Fi profiles block inbound mDNS/multicast discovery by default —
+// that's a reasonable default (same profile also hardens file sharing etc.),
+// so rather than ask the user to reclassify their whole network as Private,
+// we request a narrow firewall exception scoped to this app's exe (TCP, for
+// the web-driver HTTP/SSE port) and UDP 5353 (for its mDNS advertisement).
+// Adding a firewall rule needs admin rights, so this triggers exactly one
+// UAC consent prompt (a single elevated PowerShell running both netsh adds)
+// — never attempted silently; the user sees and must approve the OS prompt.
+ipcMain.handle('app:add-firewall-rule', async () => {
+  if (!app.isPackaged) {
+    return { ok: false, error: 'Only available in the installed app, not a dev run.' };
+  }
+  const exePath = process.execPath;
+  const scriptPath = path.join(os.tmpdir(), `terminalapp-firewall-${Date.now()}.ps1`);
+  const script = [
+    `netsh advfirewall firewall add rule name="Folders Remote (TCP)" dir=in action=allow program="${exePath}" protocol=TCP enable=yes profile=any`,
+    `netsh advfirewall firewall add rule name="Folders Remote (mDNS)" dir=in action=allow program="${exePath}" protocol=UDP localport=5353 enable=yes profile=any`,
+  ].join('\r\n');
+  fs.writeFileSync(scriptPath, script, 'utf8');
+
+  const command =
+    `Start-Process powershell -Verb RunAs -Wait -ArgumentList ` +
+    `'-NoProfile','-ExecutionPolicy','Bypass','-File','${scriptPath}'`;
+
+  return new Promise<{ ok: boolean; error?: string }>((resolve) => {
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-Command', command],
+      { timeout: 120_000 },
+      (err, _stdout, stderr) => {
+        try {
+          fs.unlinkSync(scriptPath);
+        } catch {
+          // best-effort cleanup
+        }
+        if (err) {
+          // Includes the user declining the UAC prompt, which PowerShell
+          // surfaces as a non-zero exit from the outer Start-Process call.
+          resolve({ ok: false, error: (stderr || err.message || 'Declined or failed').trim() });
+          return;
+        }
+        resolve({ ok: true });
+      }
+    );
+  });
 });
 
 ipcMain.handle('app:get-trusted-devices', () => ({ devices: trustedDevices }));
