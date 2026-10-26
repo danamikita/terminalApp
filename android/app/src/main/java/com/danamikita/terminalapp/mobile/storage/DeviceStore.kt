@@ -12,8 +12,17 @@ data class PairedConnection(
     val label: String,
     val deviceId: String,
     val deviceSecret: String,
+    // The mDNS-advertised hostname (e.g. "DESKTOP-I17LQ3O"), when this
+    // connection was paired from a discovered instance rather than typed in
+    // manually. Used as the stable identity instead of `host`, since a PC's
+    // IP can change across restarts/DHCP renewals but its hostname won't —
+    // see ConnectScreen's reconnect logic, which re-resolves the live IP
+    // for a matching hostname whenever one is currently discovered.
+    val hostname: String? = null,
 ) {
-    val key: String get() = "$host:$port"
+    // Prefer the stable hostname as the dedup/lookup key when known, falling
+    // back to host:port for manually-entered connections with no hostname.
+    val key: String get() = hostname ?: "$host:$port"
     val credential: String get() = "device.$deviceId.$deviceSecret"
 }
 
@@ -49,6 +58,7 @@ class DeviceStore(context: Context) {
                 label = o.getString("label"),
                 deviceId = o.getString("deviceId"),
                 deviceSecret = o.getString("deviceSecret"),
+                hostname = if (o.has("hostname") && !o.isNull("hostname")) o.getString("hostname") else null,
             )
         }
     }
@@ -56,34 +66,35 @@ class DeviceStore(context: Context) {
     fun find(host: String, port: Int): PairedConnection? =
         all().find { it.host == host && it.port == port }
 
+    fun findByHostname(hostname: String): PairedConnection? =
+        all().find { it.hostname == hostname }
+
     fun save(connection: PairedConnection) {
         val others = all().filterNot { it.key == connection.key }
-        val arr = JSONArray()
-        for (c in others + connection) {
-            arr.put(
-                JSONObject()
-                    .put("host", c.host)
-                    .put("port", c.port)
-                    .put("label", c.label)
-                    .put("deviceId", c.deviceId)
-                    .put("deviceSecret", c.deviceSecret),
-            )
-        }
-        prefs.edit().putString(entriesKey, arr.toString()).apply()
+        writeAll(others + connection)
+    }
+
+    /** Refreshes the cached host:port for a hostname-identified connection after a fresh mDNS resolve. */
+    fun updateAddress(hostname: String, host: String, port: Int) {
+        val updated = all().map { if (it.hostname == hostname) it.copy(host = host, port = port) else it }
+        writeAll(updated)
     }
 
     fun remove(host: String, port: Int) {
-        val remaining = all().filterNot { it.host == host && it.port == port }
+        writeAll(all().filterNot { it.host == host && it.port == port })
+    }
+
+    private fun writeAll(connections: List<PairedConnection>) {
         val arr = JSONArray()
-        for (c in remaining) {
-            arr.put(
-                JSONObject()
-                    .put("host", c.host)
-                    .put("port", c.port)
-                    .put("label", c.label)
-                    .put("deviceId", c.deviceId)
-                    .put("deviceSecret", c.deviceSecret),
-            )
+        for (c in connections) {
+            val o = JSONObject()
+                .put("host", c.host)
+                .put("port", c.port)
+                .put("label", c.label)
+                .put("deviceId", c.deviceId)
+                .put("deviceSecret", c.deviceSecret)
+            if (c.hostname != null) o.put("hostname", c.hostname)
+            arr.put(o)
         }
         prefs.edit().putString(entriesKey, arr.toString()).apply()
     }

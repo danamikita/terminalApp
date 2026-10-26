@@ -30,12 +30,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.danamikita.terminalapp.mobile.discovery.DiscoveredInstance
 import com.danamikita.terminalapp.mobile.discovery.NsdDiscovery
 import com.danamikita.terminalapp.mobile.network.DriverClient
 import com.danamikita.terminalapp.mobile.storage.DeviceStore
 import com.danamikita.terminalapp.mobile.storage.PairedConnection
 import kotlinx.coroutines.launch
+
+private data class PairingTarget(val host: String, val port: Int, val hostname: String?)
 
 @Composable
 fun ConnectScreen(
@@ -46,7 +47,7 @@ fun ConnectScreen(
     val scope = rememberCoroutineScope()
     var manualHost by remember { mutableStateOf("") }
     var manualPort by remember { mutableStateOf("47832") }
-    var pairingTarget by remember { mutableStateOf<Pair<String, Int>?>(null) }
+    var pairingTarget by remember { mutableStateOf<PairingTarget?>(null) }
     var tokenInput by remember { mutableStateOf("") }
     var deviceName by remember { mutableStateOf(android.os.Build.MODEL) }
     var errorText by remember { mutableStateOf<String?>(null) }
@@ -55,12 +56,20 @@ fun ConnectScreen(
     val discovered by discovery.instances.collectAsState()
     val paired = remember { mutableStateOf(deviceStore.all()) }
 
-    fun connectWith(host: String, port: Int) {
-        val existing = deviceStore.find(host, port)
+    // A PC's IP can change across restarts/DHCP renewals, but its mDNS
+    // hostname doesn't — so a paired connection with a known hostname that's
+    // currently live-discovered reconnects via the fresh address (and
+    // refreshes the cached one for next time), instead of trusting a
+    // possibly-stale stored IP.
+    fun connectWith(host: String, port: Int, hostname: String?) {
+        val existing = hostname?.let { deviceStore.findByHostname(it) } ?: deviceStore.find(host, port)
         if (existing != null) {
+            if (hostname != null && (existing.host != host || existing.port != port)) {
+                deviceStore.updateAddress(hostname, host, port)
+            }
             onConnected(DriverClient("http://$host:$port", existing.credential), existing.label)
         } else {
-            pairingTarget = host to port
+            pairingTarget = PairingTarget(host, port, hostname)
         }
     }
 
@@ -69,10 +78,15 @@ fun ConnectScreen(
             Text("Paired", style = MaterialTheme.typography.titleMedium)
             LazyColumn {
                 items(paired.value) { conn ->
+                    // Prefer a live-discovered address over the cached one when this
+                    // paired connection's hostname is currently visible on the network.
+                    val live = conn.hostname?.let { hn -> discovered.find { it.hostname == hn } }
+                    val host = live?.host ?: conn.host
+                    val port = live?.port ?: conn.port
                     ListItem(
                         headlineContent = { Text(conn.label) },
-                        supportingContent = { Text("${conn.host}:${conn.port}") },
-                        modifier = Modifier.fillMaxWidth().clickable { connectWith(conn.host, conn.port) },
+                        supportingContent = { Text("$host:$port") },
+                        modifier = Modifier.fillMaxWidth().clickable { connectWith(host, port, conn.hostname) },
                     )
                 }
             }
@@ -86,7 +100,8 @@ fun ConnectScreen(
                     ListItem(
                         headlineContent = { Text(instance.hostname) },
                         supportingContent = { Text("${instance.host}:${instance.port}") },
-                        modifier = Modifier.fillMaxWidth().clickable { connectWith(instance.host, instance.port) },
+                        modifier = Modifier.fillMaxWidth()
+                            .clickable { connectWith(instance.host, instance.port, instance.hostname) },
                     )
                 }
             }
@@ -110,7 +125,7 @@ fun ConnectScreen(
             Button(
                 onClick = {
                     val port = manualPort.toIntOrNull()
-                    if (manualHost.isNotBlank() && port != null) connectWith(manualHost.trim(), port)
+                    if (manualHost.isNotBlank() && port != null) connectWith(manualHost.trim(), port, hostname = null)
                 },
                 modifier = Modifier.padding(top = 8.dp),
             ) { Text("Connect") }
@@ -119,10 +134,10 @@ fun ConnectScreen(
         }
     }
 
-    pairingTarget?.let { (host, port) ->
+    pairingTarget?.let { target ->
         AlertDialog(
             onDismissRequest = { pairingTarget = null },
-            title = { Text("Pair with $host:$port") },
+            title = { Text("Pair with ${target.host}:${target.port}") },
             text = {
                 Column {
                     Text("Enter the token shown in the desktop app's Web Driver window.")
@@ -139,13 +154,21 @@ fun ConnectScreen(
                         errorText = null
                         scope.launch {
                             try {
-                                val client = DriverClient("http://$host:$port", tokenInput.trim())
+                                val client = DriverClient("http://${target.host}:${target.port}", tokenInput.trim())
                                 val result = client.pair(deviceName.trim().ifBlank { "Android device" }, tokenInput.trim())
-                                val conn = PairedConnection(host, port, host, result.deviceId, result.deviceSecret)
+                                val label = target.hostname ?: target.host
+                                val conn = PairedConnection(
+                                    target.host,
+                                    target.port,
+                                    label,
+                                    result.deviceId,
+                                    result.deviceSecret,
+                                    hostname = target.hostname,
+                                )
                                 deviceStore.save(conn)
                                 paired.value = deviceStore.all()
                                 pairingTarget = null
-                                onConnected(DriverClient("http://$host:$port", conn.credential), conn.label)
+                                onConnected(DriverClient("http://${target.host}:${target.port}", conn.credential), conn.label)
                             } catch (e: Exception) {
                                 errorText = "Could not pair: ${e.message}"
                             } finally {
