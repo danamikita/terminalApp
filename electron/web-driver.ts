@@ -808,11 +808,24 @@ export function startWebDriver(deps: WebDriverDeps, port: number): Promise<WebDr
       // reads it directly instead of resolving the hostname; the `interface`
       // option above is what actually keeps the published A record
       // unambiguous in the first place.
+      //
+      // `host` is deliberately NOT the bare machine hostname. Windows runs
+      // its own mDNS-ish responder for the machine's real hostname
+      // ("Function Discovery Provider Host" / "Function Discovery Resource
+      // Publication" services) that answers "<hostname>.local" queries
+      // independently of this process, with the exact same kind of wrong-
+      // interface bug the `interface` option above fixes for OUR records --
+      // confirmed by querying "<hostname>.local" directly and getting a
+      // different wrong address each time, inconsistent with a single
+      // responder. Publishing our A record under a name Windows' own
+      // responder doesn't also claim avoids racing it entirely.
+      const mdnsHost = `${os.hostname()}-terminalapp`;
       bonjour.publish({
         name: `terminalApp on ${os.hostname()}`,
         type: 'terminalapp',
         protocol: 'tcp',
         port,
+        host: mdnsHost,
         interface: lanAddress || undefined,
         txt: { hostname: os.hostname(), ip: lanAddress || '' },
       });
