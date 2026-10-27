@@ -547,6 +547,19 @@ ipcMain.handle('fs:read-file', (_e, args: { filePath: string }) => {
   }
 });
 
+ipcMain.handle('clipboard:save-pasted-image', (_e, args: { data: Uint8Array; ext: string }) => {
+  try {
+    const ext = /^[a-z0-9]+$/i.test(args.ext) ? args.ext : 'png';
+    const dir = path.join(app.getPath('temp'), 'terminalapp-pasted-images');
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, `clipboard-${Date.now()}.${ext}`);
+    fs.writeFileSync(filePath, Buffer.from(args.data));
+    return { ok: true, filePath };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
 ipcMain.handle('fs:open-external', (_e, args: { filePath: string }) => {
   shell.openPath(args.filePath);
   return { ok: true };

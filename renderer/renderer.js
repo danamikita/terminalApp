@@ -503,6 +503,29 @@ function windowsPtyOptions() {
   return { backend: 'conpty', buildNumber: Number.isFinite(buildNumber) ? buildNumber : 0 };
 }
 
+// Clipboard text wins when present (unchanged paste behavior). When the
+// clipboard holds an image instead (e.g. a screenshot) with no text
+// representation, save it to a temp PNG and paste its path as an @-reference
+// so Claude Code (or any CLI reading its own prompt) can pick it up — same
+// as typing a path by hand, just without the manual save-to-file step.
+async function pasteIntoSession(sessionId) {
+  const text = await navigator.clipboard.readText();
+  if (text) {
+    ipcRenderer.send('session:write', { sessionId, data: text });
+    return;
+  }
+  const items = await navigator.clipboard.read();
+  for (const item of items) {
+    const imageType = item.types.find((t) => t.startsWith('image/'));
+    if (!imageType) continue;
+    const blob = await item.getType(imageType);
+    const data = new Uint8Array(await blob.arrayBuffer());
+    const res = await ipcRenderer.invoke('clipboard:save-pasted-image', { data, ext: imageType.split('/')[1] });
+    if (res.ok) ipcRenderer.send('session:write', { sessionId, data: `@"${res.filePath}" ` });
+    return;
+  }
+}
+
 function ensureTerminalForSession(sessionId) {
   if (sessionTerms.has(sessionId)) return sessionTerms.get(sessionId);
 
@@ -531,9 +554,7 @@ function ensureTerminalForSession(sessionId) {
       return false;
     }
     if (key === 'v') {
-      navigator.clipboard.readText().then((text) => {
-        if (text) ipcRenderer.send('session:write', { sessionId, data: text });
-      });
+      pasteIntoSession(sessionId);
       return false;
     }
     return true;
@@ -551,9 +572,7 @@ function ensureTerminalForSession(sessionId) {
       navigator.clipboard.writeText(term.getSelection());
       term.clearSelection();
     } else {
-      navigator.clipboard.readText().then((text) => {
-        if (text) ipcRenderer.send('session:write', { sessionId, data: text });
-      });
+      pasteIntoSession(sessionId);
     }
   });
 
