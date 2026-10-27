@@ -714,7 +714,21 @@ function showMarkdownPreview(folder, filePath, returnDir) {
       return;
     }
     body.innerHTML = DOMPurify.sanitize(parseMarkdown(res.content));
+    addCodeBlockCopyButtons(body);
   });
+}
+
+function addCodeBlockCopyButtons(body) {
+  for (const pre of body.querySelectorAll('pre')) {
+    const code = pre.querySelector('code') || pre;
+    const btn = el('button', 'md-copy', 'Copy');
+    btn.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(code.textContent);
+      btn.textContent = 'Copied!';
+      setTimeout(() => { btn.textContent = 'Copy'; }, 1200);
+    });
+    pre.appendChild(btn);
+  }
 }
 
 const sessionOverlay = document.getElementById('session-overlay');
