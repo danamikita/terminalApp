@@ -75,7 +75,16 @@ class NsdDiscovery(context: Context) {
                 val hostname = runCatching {
                     serviceInfo.attributes["hostname"]?.toString(Charsets.UTF_8)
                 }.getOrNull() ?: serviceInfo.serviceName
-                val address = serviceInfo.host?.hostAddress ?: return
+                // Prefer the TXT-advertised IP over serviceInfo.host: the
+                // desktop publishes an A record for every non-internal
+                // interface (Docker/WSL/Hyper-V included), and NsdServiceInfo
+                // only ever exposes one of them -- not necessarily the real
+                // LAN address. See the comment above bonjour.publish() in
+                // electron/web-driver.ts.
+                val txtIp = runCatching {
+                    serviceInfo.attributes["ip"]?.toString(Charsets.UTF_8)?.takeIf { it.isNotBlank() }
+                }.getOrNull()
+                val address = txtIp ?: serviceInfo.host?.hostAddress ?: return
                 found[serviceInfo.serviceName] = DiscoveredInstance(hostname, address, serviceInfo.port)
                 publish()
             }

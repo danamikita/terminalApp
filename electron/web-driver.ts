@@ -776,15 +776,24 @@ export function startWebDriver(deps: WebDriverDeps, port: number): Promise<WebDr
     server.once('error', reject);
     server.listen(port, '0.0.0.0', () => {
       server.removeListener('error', reject);
-      // TXT carries only the hostname — never the token or a device
-      // secret — since mDNS multicast is unauthenticated and visible to
-      // anything on the LAN, not just the intended phone.
+      // TXT carries only the hostname and LAN IP — never the token or a
+      // device secret — since mDNS multicast is unauthenticated and visible
+      // to anything on the LAN, not just the intended phone.
+      //
+      // The `ip` attribute works around a bonjour-service limitation: its
+      // self-published A records list every non-internal interface's IPv4
+      // address with no filtering (confirmed via a direct mDNS probe), which
+      // on a machine with Docker/WSL/Hyper-V also includes those virtual
+      // adapters' unreachable addresses alongside the real LAN one. A
+      // resolver has no way to tell which A record is the right one, so the
+      // client should prefer this explicit value over resolving the
+      // hostname itself.
       bonjour.publish({
         name: `terminalApp on ${os.hostname()}`,
         type: 'terminalapp',
         protocol: 'tcp',
         port,
-        txt: { hostname: os.hostname() },
+        txt: { hostname: os.hostname(), ip: getLanAddress() || '' },
       });
       resolve({
         port,
