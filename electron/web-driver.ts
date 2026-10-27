@@ -771,29 +771,50 @@ export function startWebDriver(deps: WebDriverDeps, port: number): Promise<WebDr
       sendJson(res, 404, { ok: false, error: 'not found' });
     });
 
-    const bonjour = new Bonjour();
+    // Pins the mDNS socket to the real LAN interface. Without this, Windows'
+    // multicast-interface selection for an unbound (0.0.0.0) socket is NOT
+    // reliably the default-route adapter when virtual adapters are present
+    // (Hyper-V/WSL/Docker) -- confirmed by directly sniffing mDNS traffic on
+    // a machine with those installed: incoming queries for our service were
+    // correctly received, but every response went out via a Hyper-V vEthernet
+    // address (once even a 169.254.x.x APIPA address), never the real Wi-Fi
+    // IP, so it could never reach another device on the LAN at all.
+    //
+    // Separately, bonjour-service's Service.records() (dist/lib/service.js)
+    // builds an A/AAAA record for every non-internal interface it finds via
+    // a raw os.networkInterfaces() call, with no way to scope that via public
+    // options -- on a machine with Docker/WSL/Hyper-V that means our own
+    // hostname resolves to several candidate addresses, most unreachable
+    // from another device. Confirmed on a real Android phone (adb logcat)
+    // that this isn't just "picks the wrong one": its native mDNS resolver
+    // can get stuck forever on an unreachable candidate with no timeout,
+    // which also blocks every other resolve queued behind it. The TXT `ip`
+    // fallback below never gets a chance to help here, since Android's own
+    // native resolve has to succeed before our app code sees any callback.
+    //
+    // patches/bonjour-service+*.patch (see patch-package in package.json)
+    // adds this `interface` option to both the socket-binding layer and
+    // Service.records() so only the real LAN address is ever published.
+    const lanAddress = getLanAddress();
+    const bonjour = new Bonjour(lanAddress ? { interface: lanAddress } : undefined);
 
     server.once('error', reject);
     server.listen(port, '0.0.0.0', () => {
       server.removeListener('error', reject);
       // TXT carries only the hostname and LAN IP — never the token or a
       // device secret — since mDNS multicast is unauthenticated and visible
-      // to anything on the LAN, not just the intended phone.
-      //
-      // The `ip` attribute works around a bonjour-service limitation: its
-      // self-published A records list every non-internal interface's IPv4
-      // address with no filtering (confirmed via a direct mDNS probe), which
-      // on a machine with Docker/WSL/Hyper-V also includes those virtual
-      // adapters' unreachable addresses alongside the real LAN one. A
-      // resolver has no way to tell which A record is the right one, so the
-      // client should prefer this explicit value over resolving the
-      // hostname itself.
+      // to anything on the LAN, not just the intended phone. The `ip`
+      // attribute is a belt-and-suspenders fallback for any client that
+      // reads it directly instead of resolving the hostname; the `interface`
+      // option above is what actually keeps the published A record
+      // unambiguous in the first place.
       bonjour.publish({
         name: `terminalApp on ${os.hostname()}`,
         type: 'terminalapp',
         protocol: 'tcp',
         port,
-        txt: { hostname: os.hostname(), ip: getLanAddress() || '' },
+        interface: lanAddress || undefined,
+        txt: { hostname: os.hostname(), ip: lanAddress || '' },
       });
       resolve({
         port,

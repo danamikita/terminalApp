@@ -4,6 +4,7 @@
   "description": "Folder-organized terminal session manager",
   "main": "dist/electron/main.js",
   "scripts": {
+    "postinstall": "patch-package",
     "build": "tsc",
     "start": "electron .",
     "dev": "tsc && electron .",
@@ -39,6 +40,7 @@
     "@types/node": "^26.6.4",
     "electron": "^44.5.1",
     "electron-builder": "^26.15.3",
+    "patch-package": "^8.0.1",
     "playwright-core": "^1.64.1",
     "typescript": "^7.0.2"
   },
