@@ -59,6 +59,7 @@ fun TerminalScreen(
     val focusRequester = remember { FocusRequester() }
     var terminalView by remember { mutableStateOf<TerminalCanvasView?>(null) }
     var fieldValue by remember { mutableStateOf(TextFieldValue(SENTINEL, TextRange(1))) }
+    var lastRawValue by remember { mutableStateOf(SENTINEL) }
 
     fun sendInput(text: String) {
         if (text.isEmpty()) return
@@ -120,7 +121,14 @@ fun TerminalScreen(
             // above for why it's never really empty.
             BasicTextField(
                 value = fieldValue,
-                onValueChange = { new ->
+                onValueChange = onChange@{ new ->
+                    // After a paste, some IMEs replay the exact same pre-reset value
+                    // (sentinel + pasted text) in a second onValueChange before their
+                    // native buffer has caught up with our reset below — without this
+                    // guard that replay reads as a brand-new paste and gets sent twice.
+                    if (new.text == lastRawValue) return@onChange
+                    lastRawValue = new.text
+
                     val old = fieldValue.text
                     when {
                         new.text.length > old.length && new.text.startsWith(old) ->
