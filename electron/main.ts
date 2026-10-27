@@ -25,6 +25,7 @@ import {
   cloneRepo,
 } from '../src/git';
 import { startWebDriver, getLanAddress, getTailscaleAddress, getTailscaleMagicDnsName, WebDriverHandle } from './web-driver';
+import { savePastedImage } from './pasted-images';
 
 interface FolderState extends FolderConfig {
   sessions: PtySession[];
@@ -549,11 +550,7 @@ ipcMain.handle('fs:read-file', (_e, args: { filePath: string }) => {
 
 ipcMain.handle('clipboard:save-pasted-image', (_e, args: { data: Uint8Array; ext: string }) => {
   try {
-    const ext = /^[a-z0-9]+$/i.test(args.ext) ? args.ext : 'png';
-    const dir = path.join(app.getPath('temp'), 'terminalapp-pasted-images');
-    fs.mkdirSync(dir, { recursive: true });
-    const filePath = path.join(dir, `clipboard-${Date.now()}.${ext}`);
-    fs.writeFileSync(filePath, Buffer.from(args.data));
+    const filePath = savePastedImage(Buffer.from(args.data), args.ext);
     return { ok: true, filePath };
   } catch (e) {
     return { ok: false, error: (e as Error).message };

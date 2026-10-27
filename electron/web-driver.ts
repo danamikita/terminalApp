@@ -38,6 +38,7 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import Bonjour from 'bonjour-service';
 import type { AppState, TrustedDevice } from '../src/types';
+import { savePastedImage } from './pasted-images';
 
 // Interface names that are virtual/VPN adapters rather than the NIC a phone
 // on the same Wi-Fi can actually reach — e.g. Tailscale assigns a CGNAT
@@ -437,6 +438,31 @@ function controlPage(): string {
       });
     }
 
+    // Capture phase so this runs before xterm's own paste handling, which
+    // only ever reads text/plain off ClipboardEvent.clipboardData -- an
+    // image-only clipboard just gets silently dropped there. This reads
+    // clipboardData directly rather than the async navigator.clipboard API
+    // because the driver is typically opened over plain HTTP on the LAN,
+    // where that API is unavailable outside a secure context.
+    document.addEventListener('paste', (ev) => {
+      if (!currentSessionId || !ev.clipboardData) return;
+      const item = Array.prototype.find.call(ev.clipboardData.items, (it) => it.type.indexOf('image/') === 0);
+      if (!item) return;
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      const file = item.getAsFile();
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataBase64 = reader.result.slice(reader.result.indexOf(',') + 1);
+        authedFetch('/session/' + currentSessionId + '/paste-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dataBase64: dataBase64, ext: item.type.split('/')[1] }),
+        }).catch(() => {});
+      };
+      reader.readAsDataURL(file);
+    }, true);
+
     let currentSessionId = null;
     async function openSession(sessionId) {
       closeSession();
@@ -620,7 +646,7 @@ export function startWebDriver(deps: WebDriverDeps, port: number): Promise<WebDr
       // Everything below requires the token (ephemeral, or a paired
       // device's persistent credential). EventSource can't set headers, so
       // the stream route accepts it as a query param instead.
-      const sessionMatch = /^\/session\/([^/]+)\/(buffer|stream|input|resize)$/.exec(pathname);
+      const sessionMatch = /^\/session\/([^/]+)\/(buffer|stream|input|resize|paste-image)$/.exec(pathname);
       const isStream = sessionMatch && sessionMatch[2] === 'stream';
       const suppliedToken = isStream ? query.get('token') || undefined : (req.headers['x-driver-token'] as string | undefined);
 
@@ -714,6 +740,28 @@ export function startWebDriver(deps: WebDriverDeps, port: number): Promise<WebDr
               return;
             }
             const ok = deps.resizeSession(sessionId, Math.round(cols), Math.round(rows));
+            sendJson(res, ok ? 200 : 404, { ok });
+          })
+          .catch((e) => sendJson(res, 500, { ok: false, error: (e as Error).message }));
+        return;
+      }
+
+      if (req.method === 'POST' && route === 'paste-image') {
+        readBody(req)
+          .then((body) => {
+            let parsed: { dataBase64?: string; ext?: string };
+            try {
+              parsed = JSON.parse(body);
+            } catch {
+              sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+              return;
+            }
+            if (!parsed.dataBase64) {
+              sendJson(res, 400, { ok: false, error: 'missing dataBase64' });
+              return;
+            }
+            const filePath = savePastedImage(Buffer.from(parsed.dataBase64, 'base64'), parsed.ext || 'png');
+            const ok = deps.writeToSession(sessionId, `@"${filePath}" `);
             sendJson(res, ok ? 200 : 404, { ok });
           })
           .catch((e) => sendJson(res, 500, { ok: false, error: (e as Error).message }));

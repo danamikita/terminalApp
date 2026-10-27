@@ -69,6 +69,19 @@ class DriverClient(
     }
 
     /**
+     * Uploads a pasted image; the server saves it to a temp file and types
+     * its path into the session as an @"path" reference itself, so there's
+     * no separate sendInput call needed here.
+     */
+    suspend fun pasteImage(sessionId: String, data: ByteArray, ext: String) = withContext(Dispatchers.IO) {
+        val dataBase64 = android.util.Base64.encodeToString(data, android.util.Base64.NO_WRAP)
+        val body = JSONObject().put("dataBase64", dataBase64).put("ext", ext).toString().toRequestBody(jsonMedia)
+        val req = authedRequest("/session/$sessionId/paste-image").post(body).build()
+        executeForBody(req)
+        Unit
+    }
+
+    /**
      * Opens the SSE stream and calls [onChunk] with each decoded text chunk
      * on the calling (background) thread, blocking until the stream ends.
      * Call this from a background thread/coroutine. Plain coroutine

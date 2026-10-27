@@ -2,6 +2,8 @@
 
 package com.danamikita.terminalapp.mobile.ui
 
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -27,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
@@ -56,6 +59,7 @@ fun TerminalScreen(
     onUnauthorized: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val focusRequester = remember { FocusRequester() }
     var terminalView by remember { mutableStateOf<TerminalCanvasView?>(null) }
     var fieldValue by remember { mutableStateOf(TextFieldValue(SENTINEL, TextRange(1))) }
@@ -64,6 +68,29 @@ fun TerminalScreen(
     fun sendInput(text: String) {
         if (text.isEmpty()) return
         scope.launch { runCatching { client.sendInput(sessionId, text) } }
+    }
+
+    // A dedicated button rather than hooking into the invisible capture
+    // field's paste handling below: Compose's legacy BasicTextField (the
+    // TextFieldValue/onValueChange overload used there) doesn't surface
+    // keyboard- or clipboard-originated rich content (images) to
+    // onValueChange at all -- only the newer TextFieldState-based API wires
+    // that up, and migrating would risk the paste-dedup fix just above it.
+    // Reading ClipboardManager directly here works today, for any image a
+    // user has copied (screenshot, share-to-copy, etc.), regardless of
+    // keyboard.
+    fun pasteImageFromClipboard() {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = clipboard.primaryClip ?: return
+        if (clip.itemCount == 0 || !clip.description.hasMimeType("image/*")) return
+        val uri = clip.getItemAt(0).uri ?: return
+        val ext = (clip.description.getMimeType(0) ?: "image/png").substringAfter('/', "png")
+        scope.launch {
+            val bytes = runCatching {
+                context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            }.getOrNull() ?: return@launch
+            runCatching { client.pasteImage(sessionId, bytes, ext) }
+        }
     }
 
     DisposableEffect(sessionId) {
@@ -154,6 +181,9 @@ fun TerminalScreen(
                 QuickKeyButton("↓", modifier = Modifier.weight(1f)) { sendInput("[B") }
                 QuickKeyButton("←", modifier = Modifier.weight(1f)) { sendInput("[D") }
                 QuickKeyButton("→", modifier = Modifier.weight(1f)) { sendInput("[C") }
+            }
+            Row(modifier = Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                QuickKeyButton("Paste Image", modifier = Modifier.weight(1f)) { pasteImageFromClipboard() }
             }
         }
     }
