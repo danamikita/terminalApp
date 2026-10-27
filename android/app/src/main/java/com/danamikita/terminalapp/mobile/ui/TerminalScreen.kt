@@ -4,6 +4,8 @@ package com.danamikita.terminalapp.mobile.ui
 
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -30,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
@@ -60,6 +63,7 @@ fun TerminalScreen(
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
     var terminalView by remember { mutableStateOf<TerminalCanvasView?>(null) }
     var fieldValue by remember { mutableStateOf(TextFieldValue(SENTINEL, TextRange(1))) }
@@ -134,12 +138,26 @@ fun TerminalScreen(
         }
     }
 
-    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+        keyboardController?.show()
+    }
 
     Scaffold(topBar = { TopAppBar(title = { Text(sessionName) }) }) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             AndroidView(
-                modifier = Modifier.fillMaxSize().weight(1f),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .weight(1f)
+                    // The capture field below is invisible (1.dp) and never where the
+                    // user actually taps, so a tap here must re-request focus itself to
+                    // bring the keyboard back after it's been dismissed (e.g. back button,
+                    // or the system hiding it) — focus alone doesn't always reopen an
+                    // already-dismissed IME, hence the explicit show() too.
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                        focusRequester.requestFocus()
+                        keyboardController?.show()
+                    },
                 factory = { context -> TerminalCanvasView(context).also { terminalView = it } },
             )
 
@@ -159,11 +177,11 @@ fun TerminalScreen(
                     val old = fieldValue.text
                     when {
                         new.text.length > old.length && new.text.startsWith(old) ->
-                            sendInput(new.text.removePrefix(old))
+                            sendInput(new.text.removePrefix(old).replace("\n", "\r"))
                         new.text.length < SENTINEL.length ->
                             sendInput("") // backspace past the sentinel -> DEL
                         else ->
-                            sendInput(new.text) // pasted/replaced content — forward as-is
+                            sendInput(new.text.replace("\n", "\r")) // pasted/replaced content — forward as-is
                     }
                     fieldValue = TextFieldValue(SENTINEL, TextRange(SENTINEL.length))
                 },
