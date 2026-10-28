@@ -4,8 +4,6 @@ package com.danamikita.terminalapp.mobile.ui
 
 import android.content.ClipboardManager
 import android.content.Context
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -34,6 +33,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -71,6 +71,7 @@ fun TerminalScreen(
 
     fun sendInput(text: String) {
         if (text.isEmpty()) return
+        terminalView?.scrollToBottom()
         scope.launch { runCatching { client.sendInput(sessionId, text) } }
     }
 
@@ -146,19 +147,25 @@ fun TerminalScreen(
     Scaffold(topBar = { TopAppBar(title = { Text(sessionName) }) }) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             AndroidView(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .weight(1f)
-                    // The capture field below is invisible (1.dp) and never where the
-                    // user actually taps, so a tap here must re-request focus itself to
-                    // bring the keyboard back after it's been dismissed (e.g. back button,
-                    // or the system hiding it) — focus alone doesn't always reopen an
-                    // already-dismissed IME, hence the explicit show() too.
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                        focusRequester.requestFocus()
-                        keyboardController?.show()
-                    },
-                factory = { context -> TerminalCanvasView(context).also { terminalView = it } },
+                modifier = Modifier.fillMaxSize().weight(1f),
+                factory = { context ->
+                    TerminalCanvasView(context).also {
+                        terminalView = it
+                        // The capture field below is invisible (1.dp) and never where the
+                        // user actually taps, so a tap here must re-request focus itself to
+                        // bring the keyboard back after it's been dismissed (e.g. back
+                        // button, or the system hiding it) — focus alone doesn't always
+                        // reopen an already-dismissed IME, hence the explicit show() too.
+                        // Handled as a tap callback from the view's own gesture detector
+                        // (rather than Compose's clickable) since the view also needs to
+                        // recognize vertical drags as scrollback, and the two gesture
+                        // systems would otherwise compete for the same touch stream.
+                        it.onTap = {
+                            focusRequester.requestFocus()
+                            keyboardController?.show()
+                        }
+                    }
+                },
             )
 
             // Invisible capture field: keeps the soft keyboard up and turns
@@ -166,22 +173,28 @@ fun TerminalScreen(
             // above for why it's never really empty.
             BasicTextField(
                 value = fieldValue,
+                keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Password),
                 onValueChange = onChange@{ new ->
-                    // After a paste, some IMEs replay the exact same pre-reset value
-                    // (sentinel + pasted text) in a second onValueChange before their
-                    // native buffer has caught up with our reset below — without this
-                    // guard that replay reads as a brand-new paste and gets sent twice.
-                    if (new.text == lastRawValue) return@onChange
-                    lastRawValue = new.text
-
                     val old = fieldValue.text
                     when {
                         new.text.length > old.length && new.text.startsWith(old) ->
                             sendInput(new.text.removePrefix(old).replace("\n", "\r"))
                         new.text.length < SENTINEL.length ->
-                            sendInput("") // backspace past the sentinel -> DEL
-                        else ->
+                            sendInput("\u007f") // backspace past the sentinel -> DEL
+                        else -> {
+                            // After a paste, some IMEs replay the exact same pre-reset value
+                            // (sentinel + pasted text) in a second onValueChange before their
+                            // native buffer has caught up with our reset below — without this
+                            // guard that replay reads as a brand-new paste and gets sent twice.
+                            // Scoped to this branch only: applied globally it also caught
+                            // consecutive Backspace presses, which legitimately produce the
+                            // same post-reset "" value every time, and silently dropped every
+                            // one after the first since lastRawValue was never resynced to
+                            // SENTINEL alongside the fieldValue reset below.
+                            if (new.text == lastRawValue) return@onChange
+                            lastRawValue = new.text
                             sendInput(new.text.replace("\n", "\r")) // pasted/replaced content — forward as-is
+                        }
                     }
                     fieldValue = TextFieldValue(SENTINEL, TextRange(SENTINEL.length))
                 },
@@ -189,7 +202,7 @@ fun TerminalScreen(
             )
 
             Row(modifier = Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                QuickKeyButton("Esc", modifier = Modifier.weight(1f)) { sendInput("") }
+                QuickKeyButton("Esc", modifier = Modifier.weight(1f)) { sendInput("\u001b") }
                 QuickKeyButton("Tab", modifier = Modifier.weight(1f)) { sendInput("\t") }
                 QuickKeyButton("Ctrl+C", modifier = Modifier.weight(1f)) { sendInput(ctrl('C')) }
                 QuickKeyButton("Ctrl+D", modifier = Modifier.weight(1f)) { sendInput(ctrl('D')) }

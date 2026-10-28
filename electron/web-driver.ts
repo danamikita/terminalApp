@@ -235,7 +235,7 @@ function controlPage(): string {
   button:hover { filter: brightness(1.15); }
   #backBtn { background:#0e639c; border-color:#0e639c; color:#fff; }
   #termTitle { flex: 1; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #termContainer { flex: 1; min-height: 0; padding: 4px; }
+  #termContainer { flex: 1; min-height: 0; padding: 4px; touch-action: none; }
   .keys { display: flex; gap: 6px; padding: 8px; border-top: 1px solid #333; }
   .keys button { flex: 1; }
 </style>
@@ -533,6 +533,39 @@ function controlPage(): string {
     document.getElementById('scrollUpBtn').addEventListener('click', () => term && term.scrollLines(-10));
     document.getElementById('scrollDownBtn').addEventListener('click', () => term && term.scrollLines(10));
     document.getElementById('scrollBottomBtn').addEventListener('click', () => term && term.scrollToBottom());
+
+    // One-finger vertical drag on the terminal itself also scrolls, so touch
+    // users aren't limited to the buttons above. xterm redraws rows rather
+    // than exposing a scrollable DOM element, so this measures the rendered
+    // row height off its own DOM (falling back to a reasonable guess) and
+    // feeds whole-line drags into scrollLines as the finger moves.
+    (function () {
+      let touchY = null;
+      let pxAccum = 0;
+      function rowHeightPx() {
+        const rowsEl = term && term.element && term.element.querySelector('.xterm-rows');
+        if (!rowsEl || !term.rows) return 17;
+        return rowsEl.getBoundingClientRect().height / term.rows;
+      }
+      termContainerEl.addEventListener('touchstart', (ev) => {
+        if (ev.touches.length !== 1) return;
+        touchY = ev.touches[0].clientY;
+        pxAccum = 0;
+      }, { passive: true });
+      termContainerEl.addEventListener('touchmove', (ev) => {
+        if (touchY === null || !term || ev.touches.length !== 1) return;
+        const y = ev.touches[0].clientY;
+        pxAccum += y - touchY; // finger moving down -> scroll back toward history
+        touchY = y;
+        const rh = rowHeightPx();
+        const lines = Math.trunc(pxAccum / rh);
+        if (lines !== 0) {
+          term.scrollLines(-lines);
+          pxAccum -= lines * rh;
+        }
+      }, { passive: true });
+      termContainerEl.addEventListener('touchend', () => { touchY = null; });
+    })();
 
     document.getElementById('backBtn').addEventListener('click', () => {
       location.hash = '';
