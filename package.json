@@ -1,6 +1,6 @@
 {
   "name": "terminalapp",
-  "version": "1.6.15",
+  "version": "1.6.16",
   "description": "Folder-organized terminal session manager",
   "main": "dist/electron/main.js",
   "scripts": {
