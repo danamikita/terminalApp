@@ -13,6 +13,7 @@ export interface FolderConfig {
   lastCommand?: string;
   lastShell?: ShellType;
   resumeSessions?: ResumableSession[];
+  archived?: boolean;
 }
 
 export interface IdeRuleConfig {
@@ -64,6 +65,7 @@ export interface FolderSnapshot {
   path: string;
   lastCommand?: string;
   lastShell?: ShellType;
+  archived: boolean;
   sessions: SessionSnapshot[];
 }
 

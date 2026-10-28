@@ -166,6 +166,7 @@ function getState(): AppState {
       path: f.path,
       lastCommand: f.lastCommand,
       lastShell: f.lastShell,
+      archived: !!f.archived,
       sessions: f.sessions.map((s) => ({
         id: s.id,
         folderId: s.folderId,
@@ -428,6 +429,14 @@ ipcMain.handle('app:remove-folder', (_e, args: { folderId: string }) => {
   for (const session of folder.sessions) session.kill();
   const idx = folders.indexOf(folder);
   if (idx >= 0) folders.splice(idx, 1);
+  persist();
+  return { ok: true, state: getState() };
+});
+
+ipcMain.handle('app:set-folder-archived', (_e, args: { folderId: string; archived: boolean }) => {
+  const folder = findFolder(args.folderId);
+  if (!folder) return { ok: false, error: 'Folder not found', state: getState() };
+  folder.archived = args.archived;
   persist();
   return { ok: true, state: getState() };
 });

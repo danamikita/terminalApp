@@ -320,6 +320,31 @@ html, body {
   font-style: italic;
 }
 
+.archived-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 10px 9px 7px;
+  cursor: pointer;
+  user-select: none;
+  color: #888;
+  font-size: 12px;
+}
+
+.archived-header:hover {
+  background: #2a2d2e;
+}
+
+.folder-row.archived {
+  background: #2a2c2f;
+  opacity: 0.75;
+}
+
+.folder-row.archived .folder-name {
+  font-weight: 400;
+  color: #bbb;
+}
+
 #main {
   flex: 1;
   display: flex;

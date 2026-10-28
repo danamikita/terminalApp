@@ -8,6 +8,7 @@ const DOMPurify = require('dompurify');
 
 let state = { folders: [] };
 const collapsed = new Set();
+let archivedExpanded = false;
 const sessionTerms = new Map(); // sessionId -> { term, fitAddon, container }
 
 const folderBrowseDir = new Map(); // folderId -> last-browsed directory (sticky)
@@ -156,7 +157,7 @@ async function refreshGitInfo() {
   if (gitRefreshInFlight) return;
   gitRefreshInFlight = true;
   try {
-    const folders = state.folders.slice();
+    const folders = state.folders.filter((f) => !f.archived);
     let next = 0;
     async function worker() {
       while (next < folders.length) {
@@ -177,6 +178,7 @@ async function refreshGitInfo() {
 
 async function refreshIdeMatches() {
   for (const folder of state.folders) {
+    if (folder.archived) continue;
     try {
       const res = await ipcRenderer.invoke('app:list-ide-matches', { dirPath: folder.path });
       ideMatches.set(folder.id, res.matches || []);
@@ -258,7 +260,14 @@ function renderSidebar() {
     return;
   }
 
-  for (const folder of state.folders) {
+  const activeFolders = state.folders.filter((f) => !f.archived);
+  const archivedFolders = state.folders.filter((f) => f.archived);
+
+  if (activeFolders.length === 0) {
+    folderListEl.appendChild(el('div', 'empty-hint', 'All folders are archived.'));
+  }
+
+  for (const folder of activeFolders) {
     const isCollapsed = collapsed.has(folder.id);
     const row = el('div', 'folder-row');
     row.dataset.testid = 'folder-row';
@@ -288,6 +297,15 @@ function renderSidebar() {
       promptNewSession(folder);
     });
     main.appendChild(newBtn);
+
+    const archiveBtn = el('button', 'row-btn', '🗄');
+    archiveBtn.dataset.testid = 'archive-folder-btn';
+    archiveBtn.title = 'Archive folder';
+    archiveBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      archiveFolder(folder);
+    });
+    main.appendChild(archiveBtn);
 
     const trashBtn = el('button', 'row-btn', '✕');
     trashBtn.dataset.testid = 'remove-folder-btn';
@@ -393,6 +411,50 @@ function renderSidebar() {
 
         sRow.addEventListener('click', () => selectSession(session.id));
         folderListEl.appendChild(sRow);
+      }
+    }
+  }
+
+  if (archivedFolders.length > 0) {
+    const header = el('div', 'archived-header');
+    header.dataset.testid = 'archived-header';
+    header.appendChild(el('span', 'folder-arrow', archivedExpanded ? '▾' : '▸'));
+    header.appendChild(el('span', 'archived-label', `Archived (${archivedFolders.length})`));
+    header.addEventListener('click', () => {
+      archivedExpanded = !archivedExpanded;
+      renderSidebar();
+    });
+    folderListEl.appendChild(header);
+
+    if (archivedExpanded) {
+      for (const folder of archivedFolders) {
+        const row = el('div', 'folder-row archived');
+        row.dataset.testid = 'archived-folder-row';
+        row.dataset.folderId = folder.id;
+        const main = el('div', 'folder-main');
+        main.appendChild(el('span', 'folder-icon', '📦'));
+        main.appendChild(el('span', 'folder-name', folder.name));
+
+        const unarchiveBtn = el('button', 'row-btn', '📤');
+        unarchiveBtn.dataset.testid = 'unarchive-folder-btn';
+        unarchiveBtn.title = 'Unarchive folder';
+        unarchiveBtn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          unarchiveFolder(folder);
+        });
+        main.appendChild(unarchiveBtn);
+
+        const trashBtn = el('button', 'row-btn', '✕');
+        trashBtn.dataset.testid = 'remove-folder-btn';
+        trashBtn.title = 'Remove folder';
+        trashBtn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          removeFolder(folder);
+        });
+        main.appendChild(trashBtn);
+
+        row.appendChild(main);
+        folderListEl.appendChild(row);
       }
     }
   }
@@ -859,6 +921,35 @@ async function removeFolder(folder) {
 
   applyLayout();
   renderSidebar();
+}
+
+async function archiveFolder(folder) {
+  if (!closeAllTabsForFolder(folder)) return;
+  const res = await ipcRenderer.invoke('app:set-folder-archived', { folderId: folder.id, archived: true });
+  state = res.state;
+
+  if (filesPanelState && filesPanelState.folderId === folder.id) {
+    filesPanelState = null;
+    if (singleModeShowing === 'files') singleModeShowing = 'placeholder';
+  }
+  if (gitPanelState && gitPanelState.folderId === folder.id) {
+    gitPanelState = null;
+  }
+  if (activeSessionId && folder.sessions.some((s) => s.id === activeSessionId)) {
+    activeSessionId = null;
+    if (singleModeShowing === 'session') singleModeShowing = 'placeholder';
+  }
+
+  applyLayout();
+  renderSidebar();
+}
+
+async function unarchiveFolder(folder) {
+  const res = await ipcRenderer.invoke('app:set-folder-archived', { folderId: folder.id, archived: false });
+  state = res.state;
+  renderSidebar();
+  refreshGitInfo();
+  refreshIdeMatches();
 }
 
 addFolderBtn.addEventListener('click', async () => {
