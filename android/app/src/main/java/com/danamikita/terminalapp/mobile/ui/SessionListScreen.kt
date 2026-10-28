@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Divider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -42,6 +43,8 @@ fun SessionListScreen(
     label: String,
     onOpenSession: (SessionInfo) -> Unit,
     onUnauthorized: () -> Unit,
+    onCheckForUpdate: () -> Unit,
+    checkingForUpdate: Boolean,
 ) {
     var state by remember { mutableStateOf<AppStateInfo?>(null) }
     var errorText by remember { mutableStateOf<String?>(null) }
@@ -61,7 +64,18 @@ fun SessionListScreen(
         }
     }
 
-    Scaffold(topBar = { TopAppBar(title = { Text(label) }) }) { padding ->
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(label) },
+                actions = {
+                    IconButton(onClick = onCheckForUpdate, enabled = !checkingForUpdate) {
+                        Text(if (checkingForUpdate) "…" else "⟳")
+                    }
+                },
+            )
+        },
+    ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             val folders = state?.folders.orEmpty().filter { it.sessions.isNotEmpty() }
             if (folders.isEmpty() && errorText == null) {

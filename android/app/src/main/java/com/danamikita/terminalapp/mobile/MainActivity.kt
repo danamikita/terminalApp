@@ -1,6 +1,7 @@
 package com.danamikita.terminalapp.mobile
 
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
@@ -56,10 +57,26 @@ class MainActivity : ComponentActivity() {
                     var updateInfo by remember { mutableStateOf<UpdateInfo?>(null) }
                     var updating by remember { mutableStateOf(false) }
                     var updateError by remember { mutableStateOf<String?>(null) }
+                    var checkingUpdate by remember { mutableStateOf(false) }
 
-                    LaunchedEffect(Unit) {
-                        updateInfo = updateChecker.checkForUpdate(BuildConfig.VERSION_NAME)
+                    // Shared by the silent launch-time check below and the manual
+                    // "check for updates" button -- `manual` just controls whether a
+                    // "you're up to date" result gets surfaced, since the launch check
+                    // should stay silent when there's nothing to offer.
+                    fun checkForUpdates(manual: Boolean) {
+                        scope.launch {
+                            if (manual) checkingUpdate = true
+                            val result = updateChecker.checkForUpdate(BuildConfig.VERSION_NAME)
+                            if (result != null) {
+                                updateInfo = result
+                            } else if (manual) {
+                                Toast.makeText(context, "You're up to date (v${BuildConfig.VERSION_NAME})", Toast.LENGTH_SHORT).show()
+                            }
+                            checkingUpdate = false
+                        }
                     }
+
+                    LaunchedEffect(Unit) { checkForUpdates(manual = false) }
 
                     updateInfo?.let { info ->
                         AlertDialog(
@@ -132,6 +149,8 @@ class MainActivity : ComponentActivity() {
                                         activeClient = null
                                         navController.popBackStack("connect", inclusive = false)
                                     },
+                                    onCheckForUpdate = { checkForUpdates(manual = true) },
+                                    checkingForUpdate = checkingUpdate,
                                 )
                             }
                         }
