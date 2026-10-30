@@ -37,6 +37,7 @@ const fileBrowserEl = document.getElementById('file-browser');
 const markdownPreviewEl = document.getElementById('markdown-preview');
 const editorPaneEl = document.getElementById('editor-pane');
 const gitPanelEl = document.getElementById('git-panel');
+const searchPanelEl = document.getElementById('search-panel');
 const splitToggleBtn = document.getElementById('split-toggle');
 const autoResumeToggleBtn = document.getElementById('auto-resume-toggle');
 const checkUpdateBtn = document.getElementById('check-update-btn');
@@ -351,6 +352,17 @@ function renderSidebar() {
       filesRow.addEventListener('click', () => openFilesForFolder(folder));
       folderListEl.appendChild(filesRow);
 
+      const searchRow = el('div', 'session-row');
+      searchRow.dataset.testid = 'search-row';
+      searchRow.dataset.folderId = folder.id;
+      if (filesPanelState && filesPanelState.folderId === folder.id && filesPanelState.view === 'search' && (splitMode || singleModeShowing === 'files')) {
+        searchRow.classList.add('selected');
+      }
+      searchRow.appendChild(el('span', 'status-dot', '🔎'));
+      searchRow.appendChild(el('span', 'session-name', 'Search'));
+      searchRow.addEventListener('click', () => openSearchForFolder(folder));
+      folderListEl.appendChild(searchRow);
+
       const info = gitInfo.get(folder.id);
       if (info && info.isRepo) {
         const gitRow = el('div', 'session-row');
@@ -536,6 +548,7 @@ function applyLayout() {
   markdownPreviewEl.classList.toggle('visible', hasFiles && filesPanelState.view === 'markdown');
   editorPaneEl.classList.toggle('visible', hasFiles && filesPanelState.view === 'editor');
   gitPanelEl.classList.toggle('visible', hasFiles && filesPanelState.view === 'git');
+  searchPanelEl.classList.toggle('visible', hasFiles && filesPanelState.view === 'search');
 
   const hasSession = activeSessionId !== null;
   terminalEmptyEl.classList.toggle('visible', !hasSession);

@@ -24,6 +24,7 @@ import {
   commitStaged,
   cloneRepo,
 } from '../src/git';
+import { searchFileNames, searchFileContents } from '../src/file-search';
 import { startWebDriver, getLanAddress, getTailscaleAddress, getTailscaleMagicDnsName, WebDriverHandle } from './web-driver';
 import { savePastedImage } from './pasted-images';
 
@@ -556,6 +557,25 @@ ipcMain.handle('fs:read-file', (_e, args: { filePath: string }) => {
     return { ok: false, error: (e as Error).message };
   }
 });
+
+ipcMain.handle('fs:search-files', (_e, args: { dirPath: string; query: string }) => {
+  try {
+    return { ok: true, results: searchFileNames(args.dirPath, args.query) };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
+ipcMain.handle(
+  'fs:search-text',
+  (_e, args: { dirPath: string; query: string; caseSensitive?: boolean }) => {
+    try {
+      return { ok: true, results: searchFileContents(args.dirPath, args.query, { caseSensitive: args.caseSensitive }) };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
+    }
+  }
+);
 
 ipcMain.handle('clipboard:save-pasted-image', (_e, args: { data: Uint8Array; ext: string }) => {
   try {

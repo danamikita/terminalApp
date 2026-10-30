@@ -41,6 +41,7 @@
           <div id="markdown-preview" class="pane"></div>
           <div id="editor-pane" class="pane"></div>
           <div id="git-panel" class="pane"></div>
+          <div id="search-panel" class="pane"></div>
         </div>
         <div id="slot-terminal" class="slot">
           <div id="terminal-empty" class="pane-empty">Select a session, or create one with the <strong>+</strong> next to a folder.</div>
@@ -186,6 +187,13 @@
     </div>
   </div>
 
+  <div id="quickopen-overlay" class="hidden">
+    <div id="quickopen-modal">
+      <input id="quickopen-input" type="text" placeholder="Go to file..." autocomplete="off" spellcheck="false" />
+      <div id="quickopen-results"></div>
+    </div>
+  </div>
+
   <div id="settings-overlay" class="hidden">
     <div id="settings-modal">
       <div id="settings-title-bar">Settings</div>
@@ -240,5 +248,6 @@
   <script src="./renderer.js"></script>
   <script src="./editor.js"></script>
   <script src="./git-panel.js"></script>
+  <script src="./search-panel.js"></script>
 </body>
 </html>

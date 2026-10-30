@@ -284,6 +284,25 @@ function renderEditorPane(folder, justSaved) {
   }
 }
 
+// Called after openFileInEditor() resolves for filePath, so the tab's
+// cmView is guaranteed to exist.
+function revealLineInEditor(folder, filePath, lineNumber, col) {
+  const tabs = editorTabs.get(folder.id);
+  const tab = tabs && tabs.get(filePath);
+  if (!tab || !tab.cmView) return;
+
+  const view = tab.cmView;
+  const lineNum = Math.max(1, Math.min(lineNumber, view.state.doc.lines));
+  const line = view.state.doc.line(lineNum);
+  const from = Math.min(line.from + Math.max(0, col || 0), line.to);
+
+  view.dispatch({
+    selection: { anchor: from, head: line.to },
+    effects: EditorView.scrollIntoView(from, { y: 'center' }),
+  });
+  view.focus();
+}
+
 async function saveActiveTab(folder) {
   const filePath = activeEditorTab.get(folder.id);
   if (!filePath) return;
