@@ -1,4 +1,4 @@
-// Drives the Folders Electron app via Playwright's CDP attachment, so it can
+// Drives the Folderminal Electron app via Playwright's CDP attachment, so it can
 // be tested by selector/eval instead of blind screen-coordinate automation.
 // Runs with TERMINALAPP_TEST=1 — an isolated config dir (~/.terminalapp-test)
 // that never auto-resumes real sessions, kept separate from both the

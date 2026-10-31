@@ -15,5 +15,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "FoldersRemote"
+rootProject.name = "Folderminal"
 include(":app")

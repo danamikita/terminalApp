@@ -22,7 +22,7 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.danamikita.terminalapp.mobile"
+        applicationId = "com.pragmaticbytes.folderminal"
         minSdk = 26
         targetSdk = 36
         versionCode = releaseVersionCode

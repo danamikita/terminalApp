@@ -1,4 +1,4 @@
-# Folders
+# Folderminal
 
 A desktop app for organizing terminal sessions (like Claude Code sessions, or any
 shell command) by project folder, instead of hunting through scattered terminal
@@ -55,7 +55,7 @@ browser, code editor, and a full git panel.
 
 - **Native folder picker**, or **create a brand-new folder** on disk from inside the app
 - **Windows Explorer integration** — right-click any folder (or its empty space)
-  to "Add to Folders" directly, no need to open the app first (packaged builds only)
+  to "Add to Folderminal" directly, no need to open the app first (packaged builds only)
 
 ### Automation & feedback
 
@@ -173,7 +173,7 @@ scripts/       electron-drive.mjs — a Playwright-based CLI driver used to
 
 Windows-only for now — sessions are spawned via `cmd.exe`, PowerShell, or Git
 Bash (`src/pty-session.ts`), chosen per-session from the shell picker, and the
-Explorer "Add to Folders" context menu entry is Windows-specific. The rest of
+Explorer "Add to Folderminal" context menu entry is Windows-specific. The rest of
 the stack (Electron/node-pty/xterm.js) is cross-platform, so porting is mostly
 about the shell resolution and the Explorer integration.
 

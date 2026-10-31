@@ -1,5 +1,5 @@
 {
-  "name": "terminalapp",
+  "name": "folderminal",
   "version": "1.6.18",
   "description": "Folder-organized terminal session manager",
   "main": "dist/electron/main.js",
@@ -48,8 +48,8 @@
     "electron-winstaller@5.4.0": true
   },
   "build": {
-    "appId": "com.danamikita.foldersapp",
-    "productName": "Folders",
+    "appId": "com.pragmaticbytes.folderminal",
+    "productName": "Folderminal",
     "npmRebuild": false,
     "directories": {
       "output": "release"

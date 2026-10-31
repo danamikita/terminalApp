@@ -191,7 +191,7 @@ function createWindow(): void {
   win = new BrowserWindow({
     width: 1200,
     height: 800,
-    title: 'Folders',
+    title: 'Folderminal',
     backgroundColor: '#1e1e1e',
     webPreferences: {
       nodeIntegration: true,
@@ -291,18 +291,18 @@ function setupAutoUpdate(): void {
   setInterval(() => autoUpdater.checkForUpdatesAndNotify(), 4 * 60 * 60 * 1000);
 }
 
-const CONTEXT_MENU_KEY = 'AddToFoldersApp';
+const CONTEXT_MENU_KEY = 'AddToFolderminalApp';
 
 function registerWindowsContextMenu(): void {
   if (process.platform !== 'win32' || !app.isPackaged) return;
   const exePath = process.execPath;
   const run = (args: string[]) => execFileSync('reg', args, { stdio: 'ignore' });
   try {
-    run(['add', `HKCU\\Software\\Classes\\Directory\\shell\\${CONTEXT_MENU_KEY}`, '/ve', '/d', 'Add to Folders', '/f']);
+    run(['add', `HKCU\\Software\\Classes\\Directory\\shell\\${CONTEXT_MENU_KEY}`, '/ve', '/d', 'Add to Folderminal', '/f']);
     run(['add', `HKCU\\Software\\Classes\\Directory\\shell\\${CONTEXT_MENU_KEY}`, '/v', 'Icon', '/d', `"${exePath}",0`, '/f']);
     run(['add', `HKCU\\Software\\Classes\\Directory\\shell\\${CONTEXT_MENU_KEY}\\command`, '/ve', '/d', `"${exePath}" "--add-folder" "%1"`, '/f']);
 
-    run(['add', `HKCU\\Software\\Classes\\Directory\\Background\\shell\\${CONTEXT_MENU_KEY}`, '/ve', '/d', 'Add this folder to Folders', '/f']);
+    run(['add', `HKCU\\Software\\Classes\\Directory\\Background\\shell\\${CONTEXT_MENU_KEY}`, '/ve', '/d', 'Add this folder to Folderminal', '/f']);
     run(['add', `HKCU\\Software\\Classes\\Directory\\Background\\shell\\${CONTEXT_MENU_KEY}`, '/v', 'Icon', '/d', `"${exePath}",0`, '/f']);
     run(['add', `HKCU\\Software\\Classes\\Directory\\Background\\shell\\${CONTEXT_MENU_KEY}\\command`, '/ve', '/d', `"${exePath}" "--add-folder" "%V"`, '/f']);
   } catch (e) {
@@ -764,8 +764,8 @@ ipcMain.handle('app:add-firewall-rule', async () => {
   const exePath = process.execPath;
   const scriptPath = path.join(os.tmpdir(), `terminalapp-firewall-${Date.now()}.ps1`);
   const script = [
-    `netsh advfirewall firewall add rule name="Folders Remote (TCP)" dir=in action=allow program="${exePath}" protocol=TCP enable=yes profile=any`,
-    `netsh advfirewall firewall add rule name="Folders Remote (mDNS)" dir=in action=allow program="${exePath}" protocol=UDP localport=5353 enable=yes profile=any`,
+    `netsh advfirewall firewall add rule name="Folderminal (TCP)" dir=in action=allow program="${exePath}" protocol=TCP enable=yes profile=any`,
+    `netsh advfirewall firewall add rule name="Folderminal (mDNS)" dir=in action=allow program="${exePath}" protocol=UDP localport=5353 enable=yes profile=any`,
   ].join('\r\n');
   fs.writeFileSync(scriptPath, script, 'utf8');
 

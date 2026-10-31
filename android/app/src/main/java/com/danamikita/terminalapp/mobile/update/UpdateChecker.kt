@@ -16,12 +16,15 @@ data class UpdateInfo(val versionName: String, val downloadUrl: String, val asse
 private const val RELEASES_URL = "https://api.github.com/repos/danamikita/terminalApp/releases/latest"
 
 /**
- * This app isn't distributed through the Play Store -- it's a sideloaded
- * APK attached to GitHub releases (see .github/workflows/release.yml, which
- * uploads "FoldersRemote-vX.Y.Z.apk" alongside the desktop installer for
- * every pushed "vX.Y.Z" tag). Nothing updates it automatically, so this
- * checks the latest release on launch and offers to download + install it
- * when it's newer than the running build.
+ * Only used by the "sideload" distribution flavor (see
+ * BuildConfig.ENABLE_SELF_UPDATE / android/app/build.gradle.kts) -- that's
+ * a sideloaded APK attached to GitHub releases (see
+ * .github/workflows/release.yml, which uploads "Folderminal-vX.Y.Z.apk"
+ * alongside the desktop installer for every pushed "vX.Y.Z" tag). Nothing
+ * updates it automatically, so this checks the latest release on launch and
+ * offers to download + install it when it's newer than the running build.
+ * The "play" flavor never calls this -- Play Store builds update through
+ * Play's own mechanism instead.
  */
 class UpdateChecker(private val http: OkHttpClient = OkHttpClient()) {
     suspend fun checkForUpdate(currentVersionName: String): UpdateInfo? = withContext(Dispatchers.IO) {
@@ -44,7 +47,7 @@ class UpdateChecker(private val http: OkHttpClient = OkHttpClient()) {
         for (i in 0 until assets.length()) {
             val asset = assets.getJSONObject(i)
             val name = asset.optString("name")
-            if (name.startsWith("FoldersRemote-") && name.endsWith(".apk")) {
+            if (name.startsWith("Folderminal-") && name.endsWith(".apk")) {
                 return@withContext UpdateInfo(remoteVersion, asset.optString("browser_download_url"), name)
             }
         }

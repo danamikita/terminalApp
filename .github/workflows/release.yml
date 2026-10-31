@@ -66,7 +66,7 @@ jobs:
       - name: Upload Android APK to release
         shell: pwsh
         run: |
-          $dest = "FoldersRemote-${{ github.ref_name }}.apk"
+          $dest = "Folderminal-${{ github.ref_name }}.apk"
           Copy-Item "android\app\build\outputs\apk\sideload\release\app-sideload-release.apk" $dest
           gh release upload "${{ github.ref_name }}" $dest
         env:
