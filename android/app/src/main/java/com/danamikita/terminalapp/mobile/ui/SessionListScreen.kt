@@ -45,6 +45,7 @@ fun SessionListScreen(
     onUnauthorized: () -> Unit,
     onCheckForUpdate: () -> Unit,
     checkingForUpdate: Boolean,
+    showUpdateButton: Boolean,
 ) {
     var state by remember { mutableStateOf<AppStateInfo?>(null) }
     var errorText by remember { mutableStateOf<String?>(null) }
@@ -69,8 +70,10 @@ fun SessionListScreen(
             TopAppBar(
                 title = { Text(label) },
                 actions = {
-                    IconButton(onClick = onCheckForUpdate, enabled = !checkingForUpdate) {
-                        Text(if (checkingForUpdate) "…" else "⟳")
+                    if (showUpdateButton) {
+                        IconButton(onClick = onCheckForUpdate, enabled = !checkingForUpdate) {
+                            Text(if (checkingForUpdate) "…" else "⟳")
+                        }
                     }
                 },
             )

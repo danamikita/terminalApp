@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Only the "sideload" flavor self-updates from a downloaded GitHub
+         release APK (see UpdateChecker.kt); Play Store builds must not ship
+         that permission or its FileProvider, removed here as defense in
+         depth alongside the BuildConfig.ENABLE_SELF_UPDATE gating in
+         MainActivity.kt. -->
+    <uses-permission
+        android:name="android.permission.REQUEST_INSTALL_PACKAGES"
+        tools:node="remove" />
+
+    <application>
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            tools:node="remove" />
+    </application>
+</manifest>

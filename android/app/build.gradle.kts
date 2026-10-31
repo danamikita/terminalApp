@@ -29,6 +29,26 @@ android {
         versionName = releaseVersionName
     }
 
+    // "sideload" (GitHub-releases APK, self-updating) vs "play" (Play Store
+    // AAB) -- Play policy prohibits an app updating/replacing its own APK
+    // outside Play's own mechanism, so the "play" flavor disables the
+    // GitHub-release self-updater (see UpdateChecker.kt / MainActivity.kt)
+    // and its manifest overlay (src/play/AndroidManifest.xml) strips the
+    // now-unused REQUEST_INSTALL_PACKAGES permission and update-APK
+    // FileProvider as defense in depth.
+    flavorDimensions += "distribution"
+
+    productFlavors {
+        create("sideload") {
+            dimension = "distribution"
+            buildConfigField("boolean", "ENABLE_SELF_UPDATE", "true")
+        }
+        create("play") {
+            dimension = "distribution"
+            buildConfigField("boolean", "ENABLE_SELF_UPDATE", "false")
+        }
+    }
+
     signingConfigs {
         create("release") {
             val keystorePath = System.getenv("ANDROID_KEYSTORE_PATH")

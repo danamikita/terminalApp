@@ -64,6 +64,7 @@ class MainActivity : ComponentActivity() {
                     // "you're up to date" result gets surfaced, since the launch check
                     // should stay silent when there's nothing to offer.
                     fun checkForUpdates(manual: Boolean) {
+                        if (!BuildConfig.ENABLE_SELF_UPDATE) return
                         scope.launch {
                             if (manual) checkingUpdate = true
                             val result = updateChecker.checkForUpdate(BuildConfig.VERSION_NAME)
@@ -151,6 +152,7 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onCheckForUpdate = { checkForUpdates(manual = true) },
                                     checkingForUpdate = checkingUpdate,
+                                    showUpdateButton = BuildConfig.ENABLE_SELF_UPDATE,
                                 )
                             }
                         }
