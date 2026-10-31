@@ -30,6 +30,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
@@ -144,6 +151,28 @@ fun TerminalScreen(
         keyboardController?.show()
     }
 
+    // Physical keyboards (Chromebooks, Bluetooth keyboards) send Tab/Esc/
+    // arrows/Ctrl+C/D as real key events rather than IME text composition,
+    // so the capture field's text-diffing onValueChange below never sees
+    // them -- Tab in particular would otherwise just move Compose focus off
+    // the field instead of reaching the remote session. Mirrors the same
+    // escape sequences the quick-key buttons send, so hardware and on-screen
+    // input agree.
+    fun handleHardwareKey(event: KeyEvent): Boolean {
+        if (event.type != KeyEventType.KeyDown) return false
+        return when {
+            event.key == Key.Tab -> { sendInput("\t"); true }
+            event.key == Key.Escape -> { sendInput("\u001b"); true }
+            event.key == Key.DirectionUp -> { sendInput("\u001b[A"); true }
+            event.key == Key.DirectionDown -> { sendInput("\u001b[B"); true }
+            event.key == Key.DirectionLeft -> { sendInput("\u001b[D"); true }
+            event.key == Key.DirectionRight -> { sendInput("\u001b[C"); true }
+            event.isCtrlPressed && event.key == Key.C -> { sendInput(ctrl('C')); true }
+            event.isCtrlPressed && event.key == Key.D -> { sendInput(ctrl('D')); true }
+            else -> false
+        }
+    }
+
     Scaffold(topBar = { TopAppBar(title = { Text(sessionName) }) }) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             AndroidView(
@@ -198,7 +227,7 @@ fun TerminalScreen(
                     }
                     fieldValue = TextFieldValue(SENTINEL, TextRange(SENTINEL.length))
                 },
-                modifier = Modifier.size(1.dp).focusRequester(focusRequester),
+                modifier = Modifier.size(1.dp).focusRequester(focusRequester).onPreviewKeyEvent(::handleHardwareKey),
             )
 
             Row(modifier = Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -208,10 +237,10 @@ fun TerminalScreen(
                 QuickKeyButton("Ctrl+D", modifier = Modifier.weight(1f)) { sendInput(ctrl('D')) }
             }
             Row(modifier = Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                QuickKeyButton("↑", modifier = Modifier.weight(1f)) { sendInput("[A") }
-                QuickKeyButton("↓", modifier = Modifier.weight(1f)) { sendInput("[B") }
-                QuickKeyButton("←", modifier = Modifier.weight(1f)) { sendInput("[D") }
-                QuickKeyButton("→", modifier = Modifier.weight(1f)) { sendInput("[C") }
+                QuickKeyButton("↑", modifier = Modifier.weight(1f)) { sendInput("\u001b[A") }
+                QuickKeyButton("↓", modifier = Modifier.weight(1f)) { sendInput("\u001b[B") }
+                QuickKeyButton("←", modifier = Modifier.weight(1f)) { sendInput("\u001b[D") }
+                QuickKeyButton("→", modifier = Modifier.weight(1f)) { sendInput("\u001b[C") }
             }
             Row(modifier = Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 QuickKeyButton("Paste Image", modifier = Modifier.weight(1f)) { pasteImageFromClipboard() }
