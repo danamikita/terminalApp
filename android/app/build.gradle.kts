@@ -84,6 +84,20 @@ android {
         compose = true
         buildConfig = true
     }
+
+    // libtermux.so (bundled inside the termux-app terminal-emulator AAR) is
+    // the native PTY bridge for TerminalSession/JNI, which we deliberately
+    // never use -- we only use TerminalEmulator/TerminalRenderer for
+    // parsing/rendering (see the dependency comment below). Nothing in this
+    // app references com.termux.terminal.JNI or TerminalSession, so the
+    // library is never loaded at runtime; excluding it drops an unused
+    // native lib that isn't built with 16 KB page alignment (flagged by
+    // Play Console) instead of needing to rebuild or patch it.
+    packaging {
+        jniLibs {
+            excludes += "**/libtermux.so"
+        }
+    }
 }
 
 dependencies {
