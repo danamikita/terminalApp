@@ -11,6 +11,8 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
     steps:
       - uses: actions/checkout@v4
 
@@ -72,11 +74,35 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Not attached to the GitHub release (that page is the sideload
-      # channel and an .aab isn't directly installable) -- download this
-      # from the workflow run and upload it to the Play Console manually.
+      # Archived for manual inspection even though it's also auto-published
+      # below -- not attached to the GitHub release itself (that page is the
+      # sideload channel and an .aab isn't directly installable there).
       - name: Upload Play bundle as workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: play-release-aab
           path: android/app/build/outputs/bundle/playRelease/app-play-release.aab
+
+      # Only runs once PLAY_SERVICE_ACCOUNT_JSON is set as a repo secret --
+      # see android/app/build.gradle.kts's `play {}` block (Gradle Play
+      # Publisher). Deliberately publishes only the "play"-flavor variant
+      # (publishPlayReleaseBundle), never "sideload" -- see the comment
+      # above that task in build.gradle.kts for why.
+      - name: Decode Play service account key
+        if: ${{ env.PLAY_SERVICE_ACCOUNT_JSON != '' }}
+        shell: pwsh
+        run: |
+          Set-Content -Path "$env:RUNNER_TEMP\play-service-account.json" -Value $env:PLAY_SERVICE_ACCOUNT_JSON -Encoding utf8 -NoNewline
+
+      - name: Publish Play bundle to internal testing track
+        if: ${{ env.PLAY_SERVICE_ACCOUNT_JSON != '' }}
+        working-directory: android
+        shell: pwsh
+        run: .\gradlew.bat publishPlayReleaseBundle --console=plain
+        env:
+          ANDROID_VERSION_NAME: ${{ github.ref_name }}
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}\release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          PLAY_SERVICE_ACCOUNT_JSON_PATH: ${{ runner.temp }}\play-service-account.json

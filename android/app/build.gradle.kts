@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.github.triplet.play")
 }
 
 // Keeps the Android app's version in lockstep with the desktop app's: CI
@@ -107,4 +108,17 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.navigation:navigation-compose:2.8.4")
+}
+
+// Gradle Play Publisher. This registers a publish task per build variant
+// (e.g. publishPlayReleaseBundle, publishSideloadReleaseBundle) -- CI must
+// only ever run the "play"-flavor-qualified task. Publishing the
+// "sideload" variant here would ship the self-updating GitHub-release APK
+// to the Play Store, which is exactly what the flavor split exists to
+// prevent (see the "distribution" flavor comment above).
+play {
+    val credentialsPath = System.getenv("PLAY_SERVICE_ACCOUNT_JSON_PATH") ?: "play-service-account.json"
+    serviceAccountCredentials.set(rootProject.file(credentialsPath))
+    track.set("internal")
+    defaultToAppBundles.set(true)
 }
