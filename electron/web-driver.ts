@@ -29,6 +29,18 @@
 // hostname — never a token or device secret — since mDNS multicast is
 // unauthenticated and visible to anything on the LAN, not just the intended
 // phone.
+//
+// POST /pair-request is the no-token alternative for the native apps: a
+// device that found this machine via mDNS can ask to pair by name alone,
+// with no secret to copy at all. It's deliberately NOT gated by the
+// ephemeral token — instead it holds the HTTP connection open while
+// deps.requestPairingApproval() puts up an "X wants to connect" dialog on
+// this machine, and only mints a device credential if a human clicks
+// Allow. That's a different trust model from the token (explicit per-request
+// consent instead of a shared secret), not a weaker one — same shape as a
+// USB-debugging "Allow this computer?" prompt. Only one such request is
+// entertained at a time (see pendingPairingRequest below) so a malicious LAN
+// device can't queue up a pile of dialogs.
 import * as http from 'http';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { randomUUID, randomBytes, timingSafeEqual, createHash } from 'crypto';
@@ -134,6 +146,10 @@ export interface WebDriverDeps {
   listTrustedDevices: () => TrustedDevice[];
   addTrustedDevice: (device: TrustedDevice) => void;
   touchTrustedDevice: (deviceId: string) => void;
+  // Shows the "<name> wants to connect" approval dialog and resolves once the
+  // user clicks Allow/Deny. remoteAddress is shown alongside the (client-
+  // supplied, so spoofable) name as a second, harder-to-fake signal.
+  requestPairingApproval: (name: string, remoteAddress: string) => Promise<boolean>;
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -606,9 +622,25 @@ function serveVendorFile(res: ServerResponse, relPath: string, contentType: stri
   res.end(buf);
 }
 
+function mintDevice(name: string): TrustedDevice {
+  return {
+    id: randomUUID(),
+    secret: randomBytes(32).toString('hex'),
+    name,
+    pairedAt: Date.now(),
+    lastSeenAt: Date.now(),
+  };
+}
+
+function sanitizeDeviceName(raw: unknown): string {
+  return (typeof raw === 'string' ? raw : '').trim().slice(0, 60) || 'Unnamed device';
+}
+
 export function startWebDriver(deps: WebDriverDeps, port: number): Promise<WebDriverHandle> {
   return new Promise((resolve, reject) => {
     const token = randomUUID();
+    // Only one /pair-request in flight at a time — see the comment above.
+    let pairingRequestInFlight = false;
 
     const server = http.createServer((req: IncomingMessage, res: ServerResponse) => {
       res.setHeader('Access-Control-Allow-Origin', '*');
@@ -661,18 +693,44 @@ export function startWebDriver(deps: WebDriverDeps, port: number): Promise<WebDr
             } catch {
               parsed = {};
             }
-            const name = (parsed.name || 'Unnamed device').toString().trim().slice(0, 60) || 'Unnamed device';
-            const device: TrustedDevice = {
-              id: randomUUID(),
-              secret: randomBytes(32).toString('hex'),
-              name,
-              pairedAt: Date.now(),
-              lastSeenAt: Date.now(),
-            };
+            const device = mintDevice(sanitizeDeviceName(parsed.name));
             deps.addTrustedDevice(device);
             sendJson(res, 200, { deviceId: device.id, deviceSecret: device.secret });
           })
           .catch((e) => sendJson(res, 500, { ok: false, error: (e as Error).message }));
+        return;
+      }
+
+      // No token at all — see the big comment above. Gated by a live human
+      // approval instead, via deps.requestPairingApproval().
+      if (req.method === 'POST' && pathname === '/pair-request') {
+        if (pairingRequestInFlight) {
+          sendJson(res, 429, { ok: false, error: 'a pairing request is already pending — try again shortly' });
+          return;
+        }
+        pairingRequestInFlight = true;
+        readBody(req)
+          .then(async (body) => {
+            let parsed: { name?: string };
+            try {
+              parsed = JSON.parse(body);
+            } catch {
+              parsed = {};
+            }
+            const name = sanitizeDeviceName(parsed.name);
+            const approved = await deps.requestPairingApproval(name, req.socket.remoteAddress || 'unknown address');
+            if (!approved) {
+              sendJson(res, 403, { ok: false, error: 'pairing request denied' });
+              return;
+            }
+            const device = mintDevice(name);
+            deps.addTrustedDevice(device);
+            sendJson(res, 200, { deviceId: device.id, deviceSecret: device.secret });
+          })
+          .catch((e) => sendJson(res, 500, { ok: false, error: (e as Error).message }))
+          .finally(() => {
+            pairingRequestInFlight = false;
+          });
         return;
       }
 

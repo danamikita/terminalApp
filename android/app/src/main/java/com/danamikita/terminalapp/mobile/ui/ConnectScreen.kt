@@ -32,11 +32,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.danamikita.terminalapp.mobile.discovery.NsdDiscovery
 import com.danamikita.terminalapp.mobile.network.DriverClient
+import com.danamikita.terminalapp.mobile.network.PairingDeniedException
 import com.danamikita.terminalapp.mobile.storage.DeviceStore
 import com.danamikita.terminalapp.mobile.storage.PairedConnection
 import kotlinx.coroutines.launch
 
 private data class PairingTarget(val host: String, val port: Int, val hostname: String?)
+
+// Tracks one in-flight no-token /pair-request. Held in a class (not a plain
+// Call var) so a stale response arriving after the user hit Cancel or
+// "Enter token instead" can tell it's stale by identity and drop itself,
+// rather than overwriting whatever the UI moved on to.
+private class PendingPairingRequest(val target: PairingTarget) {
+    @Volatile var call: okhttp3.Call? = null
+}
 
 @Composable
 fun ConnectScreen(
@@ -53,24 +62,71 @@ fun ConnectScreen(
     var errorText by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
 
+    var pendingRequest by remember { mutableStateOf<PendingPairingRequest?>(null) }
+
     val discovered by discovery.instances.collectAsState()
     val paired = remember { mutableStateOf(deviceStore.all()) }
+
+    // Discovered-on-LAN devices skip straight to the no-token approval flow
+    // (startPairingRequest) — mDNS discovery means the desktop is live right
+    // now and will actually see the dialog. A manually-typed host/port is
+    // typically used for cases discovery can't reach (Tailscale, a different
+    // subnet), where a request could sit unseen for a while, so that path
+    // keeps asking for the token shown in the desktop's Web Driver window.
+    fun startPairingRequest(target: PairingTarget) {
+        errorText = null
+        val reqState = PendingPairingRequest(target)
+        pendingRequest = reqState
+        scope.launch {
+            try {
+                val client = DriverClient("http://${target.host}:${target.port}", "")
+                val result = client.requestPairing(deviceName.trim().ifBlank { "Android device" }) { call ->
+                    reqState.call = call
+                }
+                if (pendingRequest !== reqState) return@launch // cancelled / superseded while this was in flight
+                val label = target.hostname ?: target.host
+                val conn = PairedConnection(
+                    target.host,
+                    target.port,
+                    label,
+                    result.deviceId,
+                    result.deviceSecret,
+                    hostname = target.hostname,
+                )
+                deviceStore.save(conn)
+                paired.value = deviceStore.all()
+                pendingRequest = null
+                onConnected(DriverClient("http://${target.host}:${target.port}", conn.credential), conn.label)
+            } catch (e: PairingDeniedException) {
+                if (pendingRequest === reqState) {
+                    errorText = "Pairing request was denied on ${target.hostname ?: target.host}."
+                    pendingRequest = null
+                }
+            } catch (e: Exception) {
+                if (pendingRequest === reqState) {
+                    errorText = "Could not pair: ${e.message}"
+                    pendingRequest = null
+                }
+            }
+        }
+    }
 
     // A PC's IP can change across restarts/DHCP renewals, but its mDNS
     // hostname doesn't — so a paired connection with a known hostname that's
     // currently live-discovered reconnects via the fresh address (and
     // refreshes the cached one for next time), instead of trusting a
     // possibly-stale stored IP.
-    fun connectWith(host: String, port: Int, hostname: String?) {
+    fun connectWith(host: String, port: Int, hostname: String?, viaDiscovery: Boolean) {
         val existing = hostname?.let { deviceStore.findByHostname(it) } ?: deviceStore.find(host, port)
         if (existing != null) {
             if (hostname != null && (existing.host != host || existing.port != port)) {
                 deviceStore.updateAddress(hostname, host, port)
             }
             onConnected(DriverClient("http://$host:$port", existing.credential), existing.label)
-        } else {
-            pairingTarget = PairingTarget(host, port, hostname)
+            return
         }
+        val target = PairingTarget(host, port, hostname)
+        if (viaDiscovery) startPairingRequest(target) else pairingTarget = target
     }
 
     Scaffold(topBar = { TopAppBar(title = { Text("Connect to a computer") }) }) { padding ->
@@ -86,7 +142,7 @@ fun ConnectScreen(
                     ListItem(
                         headlineContent = { Text(conn.label) },
                         supportingContent = { Text("$host:$port") },
-                        modifier = Modifier.fillMaxWidth().clickable { connectWith(host, port, conn.hostname) },
+                        modifier = Modifier.fillMaxWidth().clickable { connectWith(host, port, conn.hostname, viaDiscovery = false) },
                     )
                 }
             }
@@ -101,7 +157,7 @@ fun ConnectScreen(
                         headlineContent = { Text(instance.hostname) },
                         supportingContent = { Text("${instance.host}:${instance.port}") },
                         modifier = Modifier.fillMaxWidth()
-                            .clickable { connectWith(instance.host, instance.port, instance.hostname) },
+                            .clickable { connectWith(instance.host, instance.port, instance.hostname, viaDiscovery = true) },
                     )
                 }
             }
@@ -125,7 +181,7 @@ fun ConnectScreen(
             Button(
                 onClick = {
                     val port = manualPort.toIntOrNull()
-                    if (manualHost.isNotBlank() && port != null) connectWith(manualHost.trim(), port, hostname = null)
+                    if (manualHost.isNotBlank() && port != null) connectWith(manualHost.trim(), port, hostname = null, viaDiscovery = false)
                 },
                 modifier = Modifier.padding(top = 8.dp),
             ) { Text("Connect") }
@@ -179,6 +235,33 @@ fun ConnectScreen(
                 ) { Text("Pair") }
             },
             dismissButton = { TextButton(onClick = { pairingTarget = null }) { Text("Cancel") } },
+        )
+    }
+
+    pendingRequest?.let { request ->
+        val target = request.target
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Connecting to ${target.hostname ?: target.host}") },
+            text = {
+                Column {
+                    Text("Waiting for approval on that computer — look for a \"wants to connect\" popup there.")
+                    CircularProgressIndicator(modifier = Modifier.padding(top = 12.dp))
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    request.call?.cancel()
+                    pendingRequest = null
+                    pairingTarget = target
+                }) { Text("Enter token instead") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    request.call?.cancel()
+                    pendingRequest = null
+                }) { Text("Cancel") }
+            },
         )
     }
 }

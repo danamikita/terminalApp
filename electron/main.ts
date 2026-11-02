@@ -88,6 +88,33 @@ function touchTrustedDevice(deviceId: string): void {
   }
 }
 
+// Backs web-driver's POST /pair-request: a device with no token at all asks
+// to pair by name, and this puts up a native "X wants to connect?" dialog
+// gating it on one click. Raises/focuses the window first since a background
+// dialog is easy to miss entirely; async (not *Sync) so the web driver's HTTP
+// server keeps serving other requests (SSE pings, existing sessions) while
+// this one waits on the user.
+async function requestPairingApproval(name: string, remoteAddress: string): Promise<boolean> {
+  if (win && !win.isDestroyed()) {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  }
+  const options: Electron.MessageBoxOptions = {
+    type: 'question',
+    buttons: ['Deny', 'Allow'],
+    defaultId: 0,
+    cancelId: 0,
+    title: 'Pairing request',
+    message: `"${name}" wants to connect`,
+    detail:
+      `From ${remoteAddress}. Once allowed, it can type into any of your running terminal sessions, same as sitting at this keyboard.\n\n` +
+      `Only allow this if you recognize the device and just initiated the connection yourself.`,
+  };
+  const { response } = win && !win.isDestroyed() ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options);
+  return response === 1;
+}
+
 function findFolder(folderId: string): FolderState | undefined {
   return folders.find((f) => f.id === folderId);
 }
@@ -731,6 +758,7 @@ ipcMain.handle('app:toggle-web-driver', async (_e, args: { enabled: boolean }) =
           persist();
         },
         touchTrustedDevice,
+        requestPairingApproval,
       },
       WEB_DRIVER_PORT
     );

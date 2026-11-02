@@ -12,6 +12,7 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 class UnauthorizedException : IOException("bad or missing driver token")
+class PairingDeniedException : IOException("pairing request was denied on the computer")
 
 data class PairResult(val deviceId: String, val deviceSecret: String)
 
@@ -44,6 +45,36 @@ class DriverClient(
         val obj = JSONObject(json)
         PairResult(obj.getString("deviceId"), obj.getString("deviceSecret"))
     }
+
+    /**
+     * No-token pairing: asks the desktop's web-driver to put up an "X wants
+     * to connect?" dialog and blocks (the server holds the HTTP response
+     * open) until a human there clicks Allow or Deny. [onCallCreated] is
+     * invoked synchronously with the underlying Call before the blocking
+     * network read starts, same contract as [streamSession] — callers that
+     * want a "Cancel" button must call `.cancel()` on it to unblock this.
+     */
+    suspend fun requestPairing(name: String, onCallCreated: (okhttp3.Call) -> Unit = {}): PairResult =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject().put("name", name).toString().toRequestBody(jsonMedia)
+            val call = http.newCall(Request.Builder().url("$baseUrl/pair-request").post(body).build())
+            onCallCreated(call)
+            val json = try {
+                call.execute().use { resp ->
+                    val bodyStr = resp.body?.string().orEmpty()
+                    when {
+                        resp.code == 403 -> throw PairingDeniedException()
+                        !resp.isSuccessful -> throw IOException("HTTP ${resp.code}: $bodyStr")
+                        else -> bodyStr
+                    }
+                }
+            } catch (e: IOException) {
+                if (call.isCanceled()) throw CancellationException("pairing request cancelled")
+                throw e
+            }
+            val obj = JSONObject(json)
+            PairResult(obj.getString("deviceId"), obj.getString("deviceSecret"))
+        }
 
     suspend fun listSessions(): AppStateInfo = withContext(Dispatchers.IO) {
         parseAppState(executeForBody(authedRequest("/sessions").build()))

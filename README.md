@@ -191,7 +191,9 @@ per-session token, and the UI shows a persistent warning banner the whole
 time it's enabled, but treat that token like a credential for as long as
 it's on. Opening a session remotely also resizes its real PTY to match the
 remote screen, so the desktop terminal view will reflow if both are open at
-once. See the comment at the top of
+once. The native apps can instead pair with no token at all: they ask by
+name over the LAN, and a "_X_ wants to connect" dialog pops up on the
+desktop for you to allow or deny. See the comment at the top of
 [`electron/web-driver.ts`](electron/web-driver.ts) for the full threat model.
 
 ## Releasing a new version
