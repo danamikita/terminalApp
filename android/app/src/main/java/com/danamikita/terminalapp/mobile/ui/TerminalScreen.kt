@@ -4,6 +4,7 @@ package com.danamikita.terminalapp.mobile.ui
 
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.SystemClock
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -59,6 +60,14 @@ import kotlinx.coroutines.launch
 // nothing there to remove) — this "sentinel" is never itself sent anywhere.
 private const val SENTINEL = "⁣"
 
+// Some IMEs replay the same multi-character commit (paste, autocomplete) in a
+// second onValueChange before their buffer has caught up with our SENTINEL
+// reset, which would otherwise send it twice. A replay lands within a frame
+// or two; a human repeating the same paste takes far longer than this, so a
+// short window tells the two apart without mistaking a deliberate repeat for
+// a replay.
+private const val REPLAY_SUPPRESSION_WINDOW_MS = 150L
+
 private fun ctrl(c: Char): String = (c.code and 0x1f).toChar().toString()
 
 @Composable
@@ -75,6 +84,7 @@ fun TerminalScreen(
     var terminalView by remember { mutableStateOf<TerminalCanvasView?>(null) }
     var fieldValue by remember { mutableStateOf(TextFieldValue(SENTINEL, TextRange(1))) }
     var lastRawValue by remember { mutableStateOf(SENTINEL) }
+    var lastRawValueAtMs by remember { mutableStateOf(0L) }
 
     fun sendInput(text: String) {
         if (text.isEmpty()) return
@@ -205,24 +215,35 @@ fun TerminalScreen(
                 keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Password),
                 onValueChange = onChange@{ new ->
                     val old = fieldValue.text
+                    fun isReplay(): Boolean {
+                        val now = SystemClock.uptimeMillis()
+                        if (new.text == lastRawValue && now - lastRawValueAtMs < REPLAY_SUPPRESSION_WINDOW_MS) return true
+                        lastRawValue = new.text
+                        lastRawValueAtMs = now
+                        return false
+                    }
                     when {
-                        new.text.length > old.length && new.text.startsWith(old) ->
-                            sendInput(new.text.removePrefix(old).replace("\n", "\r"))
+                        new.text.length > old.length && new.text.startsWith(old) -> {
+                            val inserted = new.text.removePrefix(old)
+                            // A single typed character can legitimately repeat (double letters,
+                            // mashing the same key) with identical before/after text every time,
+                            // since the field always resets to SENTINEL — only multi-character
+                            // inserts (paste, autocomplete) go through the replay check, which
+                            // only treats a same-content repeat as a replay within a short
+                            // window (see REPLAY_SUPPRESSION_WINDOW_MS).
+                            if (inserted.length <= 1 || !isReplay()) {
+                                sendInput(inserted.replace("\n", "\r"))
+                            }
+                        }
                         new.text.length < SENTINEL.length ->
                             sendInput("\u007f") // backspace past the sentinel -> DEL
                         else -> {
-                            // After a paste, some IMEs replay the exact same pre-reset value
-                            // (sentinel + pasted text) in a second onValueChange before their
-                            // native buffer has caught up with our reset below — without this
-                            // guard that replay reads as a brand-new paste and gets sent twice.
-                            // Scoped to this branch only: applied globally it also caught
-                            // consecutive Backspace presses, which legitimately produce the
-                            // same post-reset "" value every time, and silently dropped every
-                            // one after the first since lastRawValue was never resynced to
-                            // SENTINEL alongside the fieldValue reset below.
-                            if (new.text == lastRawValue) return@onChange
-                            lastRawValue = new.text
-                            sendInput(new.text.replace("\n", "\r")) // pasted/replaced content — forward as-is
+                            // Field replaced wholesale (e.g. paste over a selection spanning
+                            // the sentinel) — same IME-replay risk as the multi-character
+                            // insert case above, guarded the same way.
+                            if (!isReplay()) {
+                                sendInput(new.text.replace("\n", "\r")) // pasted/replaced content — forward as-is
+                            }
                         }
                     }
                     fieldValue = TextFieldValue(SENTINEL, TextRange(SENTINEL.length))

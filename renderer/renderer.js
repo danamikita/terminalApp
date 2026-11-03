@@ -629,6 +629,13 @@ function ensureTerminalForSession(sessionId) {
       return false;
     }
     if (key === 'v') {
+      // xterm.js listens for the native 'paste' event on its own hidden
+      // textarea independently of this handler's return value — returning
+      // false only skips xterm's *key* handling, it doesn't stop that native
+      // event from firing and separately forwarding clipboard text to the
+      // pty, which duplicated every paste alongside pasteIntoSession's own
+      // write. preventDefault() stops the native paste event from firing.
+      ev.preventDefault();
       pasteIntoSession(sessionId);
       return false;
     }

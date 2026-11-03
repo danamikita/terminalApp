@@ -492,6 +492,19 @@ function controlPage(): string {
         windowsPty: { backend: 'conpty', buildNumber: windowsBuildNumber },
         theme: { background: '#1e1e1e', foreground: '#d4d4d4' },
       });
+      // Without this, xterm's default keydown handling treats Ctrl+V like any
+      // other Ctrl+<letter> combo: it converts it to the literal control byte
+      // (SYN, 0x16) and calls preventDefault() on the keydown -- which also
+      // suppresses the browser's native paste action before it can fire, so
+      // the paste listener below (and xterm's own built-in one) never see
+      // anything. Returning false here skips xterm's own handling for this
+      // key without calling preventDefault ourselves, letting the native
+      // paste event through to do its job.
+      term.attachCustomKeyEventHandler((ev) => {
+        if (ev.type !== 'keydown' || ev.altKey || ev.metaKey) return true;
+        if (ev.ctrlKey && ev.key.toLowerCase() === 'v') return false;
+        return true;
+      });
       fitAddon = new FitAddon.FitAddon();
       term.loadAddon(fitAddon);
       term.open(termContainerEl);
