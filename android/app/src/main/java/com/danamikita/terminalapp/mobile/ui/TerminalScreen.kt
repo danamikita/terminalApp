@@ -2,9 +2,12 @@
 
 package com.danamikita.terminalapp.mobile.ui
 
-import android.content.ClipboardManager
-import android.content.Context
+import android.net.Uri
 import android.os.SystemClock
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -92,27 +95,36 @@ fun TerminalScreen(
         scope.launch { runCatching { client.sendInput(sessionId, text) } }
     }
 
-    // A dedicated button rather than hooking into the invisible capture
-    // field's paste handling below: Compose's legacy BasicTextField (the
-    // TextFieldValue/onValueChange overload used there) doesn't surface
-    // keyboard- or clipboard-originated rich content (images) to
-    // onValueChange at all -- only the newer TextFieldState-based API wires
-    // that up, and migrating would risk the paste-dedup fix just above it.
-    // Reading ClipboardManager directly here works today, for any image a
-    // user has copied (screenshot, share-to-copy, etc.), regardless of
-    // keyboard.
-    fun pasteImageFromClipboard() {
-        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clip = clipboard.primaryClip ?: return
-        if (clip.itemCount == 0 || !clip.description.hasMimeType("image/*")) return
-        val uri = clip.getItemAt(0).uri ?: return
-        val ext = (clip.description.getMimeType(0) ?: "image/png").substringAfter('/', "png")
+    fun toast(message: String) = Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+
+    fun sendPickedImage(uri: Uri) {
         scope.launch {
             val bytes = runCatching {
                 context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            }.getOrNull() ?: return@launch
+            }.onFailure { toast("Couldn't read image: ${it.message}") }.getOrNull()
+            if (bytes == null) {
+                toast("Couldn't read image")
+                return@launch
+            }
+            val ext = (context.contentResolver.getType(uri) ?: "image/png").substringAfter('/', "png")
             runCatching { client.pasteImage(sessionId, bytes, ext) }
+                .onFailure { toast("Couldn't send image: ${it.message}") }
         }
+    }
+
+    // A dedicated button and the system photo picker rather than hooking into
+    // the invisible capture field's paste handling below: Compose's legacy
+    // BasicTextField (the TextFieldValue/onValueChange overload used there)
+    // doesn't surface keyboard- or clipboard-originated rich content (images)
+    // to onValueChange at all -- only the newer TextFieldState-based API
+    // wires that up, and migrating would risk the paste-dedup fix just above
+    // it. The picker also sidesteps clipboard-permission flakiness entirely:
+    // it hands us a URI we already have read access to.
+    val pickImageLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) sendPickedImage(uri)
+    }
+    fun pickImage() {
+        pickImageLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
     }
 
     DisposableEffect(sessionId) {
@@ -264,7 +276,7 @@ fun TerminalScreen(
                 QuickKeyButton("→", modifier = Modifier.weight(1f)) { sendInput("\u001b[C") }
             }
             Row(modifier = Modifier.fillMaxWidth().padding(4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                QuickKeyButton("Paste Image", modifier = Modifier.weight(1f)) { pasteImageFromClipboard() }
+                QuickKeyButton("Paste Image", modifier = Modifier.weight(1f)) { pickImage() }
             }
         }
     }
