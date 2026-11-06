@@ -1,6 +1,6 @@
 {
   "name": "folderminal",
-  "version": "1.6.22",
+  "version": "1.6.23",
   "description": "Folder-organized terminal session manager",
   "main": "dist/electron/main.js",
   "scripts": {
