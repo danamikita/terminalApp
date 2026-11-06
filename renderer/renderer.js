@@ -278,6 +278,9 @@ function renderSidebar() {
     main.appendChild(el('span', 'folder-arrow', isCollapsed ? '▸' : '▾'));
     main.appendChild(el('span', 'folder-icon', '📦'));
     main.appendChild(el('span', 'folder-name', folder.name));
+    row.appendChild(main);
+
+    const actions = el('div', 'folder-actions');
 
     const matches = ideMatches.get(folder.id) || [];
     if (matches.length > 0) {
@@ -287,7 +290,7 @@ function renderSidebar() {
         ev.stopPropagation();
         handleIdeClick(folder, ideBtn);
       });
-      main.appendChild(ideBtn);
+      actions.appendChild(ideBtn);
     }
 
     const newBtn = el('button', 'row-btn', '+');
@@ -297,7 +300,7 @@ function renderSidebar() {
       ev.stopPropagation();
       promptNewSession(folder);
     });
-    main.appendChild(newBtn);
+    actions.appendChild(newBtn);
 
     const archiveBtn = el('button', 'row-btn', '🗄');
     archiveBtn.dataset.testid = 'archive-folder-btn';
@@ -306,7 +309,7 @@ function renderSidebar() {
       ev.stopPropagation();
       archiveFolder(folder);
     });
-    main.appendChild(archiveBtn);
+    actions.appendChild(archiveBtn);
 
     const trashBtn = el('button', 'row-btn', '✕');
     trashBtn.dataset.testid = 'remove-folder-btn';
@@ -315,8 +318,8 @@ function renderSidebar() {
       ev.stopPropagation();
       removeFolder(folder);
     });
-    main.appendChild(trashBtn);
-    row.appendChild(main);
+    actions.appendChild(trashBtn);
+    row.appendChild(actions);
 
     const gitBadge = buildGitBadge(folder);
     const runningCount = folder.sessions.filter((s) => s.status === 'running').length;
@@ -446,6 +449,9 @@ function renderSidebar() {
         const main = el('div', 'folder-main');
         main.appendChild(el('span', 'folder-icon', '📦'));
         main.appendChild(el('span', 'folder-name', folder.name));
+        row.appendChild(main);
+
+        const actions = el('div', 'folder-actions');
 
         const unarchiveBtn = el('button', 'row-btn', '📤');
         unarchiveBtn.dataset.testid = 'unarchive-folder-btn';
@@ -454,7 +460,7 @@ function renderSidebar() {
           ev.stopPropagation();
           unarchiveFolder(folder);
         });
-        main.appendChild(unarchiveBtn);
+        actions.appendChild(unarchiveBtn);
 
         const trashBtn = el('button', 'row-btn', '✕');
         trashBtn.dataset.testid = 'remove-folder-btn';
@@ -463,9 +469,8 @@ function renderSidebar() {
           ev.stopPropagation();
           removeFolder(folder);
         });
-        main.appendChild(trashBtn);
-
-        row.appendChild(main);
+        actions.appendChild(trashBtn);
+        row.appendChild(actions);
         folderListEl.appendChild(row);
       }
     }

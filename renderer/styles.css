@@ -121,6 +121,13 @@ html, body {
   margin-left: 21px;
 }
 
+.folder-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 21px;
+}
+
 .folder-row:first-child {
   border-top: none;
 }
