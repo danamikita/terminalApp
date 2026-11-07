@@ -224,7 +224,11 @@ fun TerminalScreen(
             // above for why it's never really empty.
             BasicTextField(
                 value = fieldValue,
-                keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Password),
+                // Text, not Password: Gboard (and most IMEs) hide the mic/voice-typing
+                // button on password-variation fields as a security measure, since
+                // dictation would mean speaking the password aloud. autoCorrectEnabled
+                // still suppresses autocorrect on this plain-text variation.
+                keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Text),
                 onValueChange = onChange@{ new ->
                     val old = fieldValue.text
                     fun isReplay(): Boolean {
