@@ -130,6 +130,14 @@ dependencies {
 // "sideload" variant here would ship the self-updating GitHub-release APK
 // to the Play Store, which is exactly what the flavor split exists to
 // prevent (see the "distribution" flavor comment above).
+//
+// track is "internal" -- every tagged release auto-publishes there with no
+// real Google review gate. Moving a specific build to "production" (where
+// Google does review it) is a deliberate, manually-triggered step instead:
+// run the "Promote Android Release" GitHub Actions workflow
+// (.github/workflows/promote-android.yml), which calls
+// promotePlayReleaseArtifact to move an already-uploaded internal build
+// over without rebuilding it.
 play {
     val credentialsPath = System.getenv("PLAY_SERVICE_ACCOUNT_JSON_PATH") ?: "play-service-account.json"
     serviceAccountCredentials.set(rootProject.file(credentialsPath))

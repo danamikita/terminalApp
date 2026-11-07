@@ -1,0 +1,90 @@
+name: Promote Android Release
+
+# Manual half of the release split: release.yml auto-publishes every tagged
+# build to the Play "internal" track (no real Google review gate). This
+# workflow is the deliberate, human-triggered step that promotes one already
+# -uploaded internal build to "production", which Google does review before
+# it goes live. Nothing here rebuilds or re-signs the app -- it only moves
+# an existing artifact between tracks via the Play Developer API, so it
+# needs the Play service account secret but not the signing keystore.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Git tag of the internal release to promote (e.g. v1.6.24)'
+        required: true
+      release_status:
+        description: 'Play release status to set on production'
+        required: true
+        default: completed
+        type: choice
+        options:
+          - completed
+          - inProgress
+          - draft
+          - halted
+      user_fraction:
+        description: 'Rollout fraction for inProgress, e.g. 0.1 for 10% (ignored otherwise)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  promote:
+    runs-on: windows-latest
+    env:
+      PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v4
+
+      - name: Decode Play service account key
+        shell: pwsh
+        run: |
+          Set-Content -Path "$env:RUNNER_TEMP\play-service-account.json" -Value $env:PLAY_SERVICE_ACCOUNT_JSON -Encoding utf8 -NoNewline
+
+      # versionCode is derived from the tag the same way build.gradle.kts
+      # derives it for a real build -- passing it explicitly to the promote
+      # task (rather than letting it default to "whatever is latest on
+      # internal") makes sure this run promotes exactly the build named in
+      # `tag`, even if newer internal builds have shipped since.
+      - name: Compute Play version code for tag
+        id: ver
+        shell: pwsh
+        run: |
+          $parts = "${{ inputs.tag }}".TrimStart('v').Split('.')
+          $major = [int]$parts[0]; $minor = [int]$parts[1]; $patch = [int]$parts[2]
+          $code = $major * 10000 + $minor * 100 + $patch
+          "code=$code" >> $env:GITHUB_OUTPUT
+
+      - name: Promote internal release to production
+        working-directory: android
+        shell: pwsh
+        run: |
+          $gradleArgs = @(
+            'promotePlayReleaseArtifact',
+            '--from-track', 'internal',
+            '--promote-track', 'production',
+            '--version-code', '${{ steps.ver.outputs.code }}',
+            '--release-status', '${{ inputs.release_status }}',
+            '--release-name', '${{ inputs.tag }}',
+            '--console=plain'
+          )
+          if ('${{ inputs.user_fraction }}' -ne '') {
+            $gradleArgs += @('--user-fraction', '${{ inputs.user_fraction }}')
+          }
+          & .\gradlew.bat @gradleArgs
+        env:
+          ANDROID_VERSION_NAME: ${{ inputs.tag }}
+          PLAY_SERVICE_ACCOUNT_JSON_PATH: ${{ runner.temp }}\play-service-account.json
