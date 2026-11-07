@@ -380,7 +380,7 @@ function controlPage(): string {
 
     function renderList(state) {
       foldersEl.innerHTML = '';
-      const folders = (state.folders || []).filter((f) => f.sessions.length > 0);
+      const folders = (state.folders || []).filter((f) => !f.archived && f.sessions.length > 0);
       if (folders.length === 0) {
         const empty = document.createElement('div');
         empty.id = 'empty';

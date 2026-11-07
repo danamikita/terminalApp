@@ -80,7 +80,7 @@ fun SessionListScreen(
         },
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
-            val folders = state?.folders.orEmpty().filter { it.sessions.isNotEmpty() }
+            val folders = state?.folders.orEmpty().filter { !it.archived && it.sessions.isNotEmpty() }
             if (folders.isEmpty() && errorText == null) {
                 Text("No running sessions.", modifier = Modifier.padding(16.dp))
             }

@@ -19,6 +19,7 @@ data class FolderInfo(
     val name: String,
     val path: String,
     val lastCommand: String?,
+    val archived: Boolean,
     val sessions: List<SessionInfo>,
 )
 
@@ -46,6 +47,7 @@ fun parseAppState(json: String): AppStateInfo {
             name = f.getString("name"),
             path = f.getString("path"),
             lastCommand = f.optStringOrNull("lastCommand"),
+            archived = f.optBoolean("archived", false),
             sessions = sessions,
         )
     }
