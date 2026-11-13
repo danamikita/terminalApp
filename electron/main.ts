@@ -233,6 +233,11 @@ function createWindow(): void {
     height: 800,
     title: 'Folderminal',
     backgroundColor: '#1e1e1e',
+    // Packaged builds get this baked into the .exe via build.win.icon in
+    // package.json (electron-builder) — this is what shows up instead when
+    // running unpackaged (`npm start`/`npm run dev`), which otherwise falls
+    // back to Electron's own default icon.
+    icon: path.join(__dirname, '..', '..', 'build', 'icon.png'),
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,

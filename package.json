@@ -63,7 +63,8 @@
       "**/*.node"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "build/icon.png"
     },
     "nsis": {
       "include": "build/installer.nsh"
