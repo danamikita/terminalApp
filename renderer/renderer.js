@@ -47,6 +47,7 @@ const webDriverUrlInput = document.getElementById('web-driver-url');
 const webDriverCopyBtn = document.getElementById('web-driver-copy');
 const webDriverCloseBtn = document.getElementById('web-driver-close');
 const webDriverBanner = document.getElementById('web-driver-banner');
+const webDriverBannerCopyBtn = document.getElementById('web-driver-banner-copy');
 const webDriverBannerOffBtn = document.getElementById('web-driver-banner-off');
 const webDriverLocalHint = document.getElementById('web-driver-local-hint');
 const webDriverTailscaleHint = document.getElementById('web-driver-tailscale-hint');
@@ -1193,6 +1194,19 @@ async function setWebDriverEnabled(enabled) {
 
 webDriverToggleBtn.addEventListener('click', () => setWebDriverEnabled(!webDriverEnabled));
 webDriverBannerOffBtn.addEventListener('click', () => setWebDriverEnabled(false));
+
+// The banner stays up for as long as the driver is on, but the overlay with
+// the actual address is only shown once, right when you turn it on -- close
+// it and the only way back used to be toggling off and on again. This gives
+// the address back without that round trip (same URL: port/token don't
+// change while the driver stays running).
+webDriverBannerCopyBtn.addEventListener('click', () => {
+  navigator.clipboard.writeText(webDriverUrlInput.value);
+  webDriverBannerCopyBtn.textContent = '✓ Copied';
+  setTimeout(() => {
+    webDriverBannerCopyBtn.textContent = '📋 Copy address';
+  }, 1500);
+});
 
 webDriverCopyBtn.addEventListener('click', () => {
   navigator.clipboard.writeText(webDriverUrlInput.value);
