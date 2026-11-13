@@ -241,10 +241,12 @@ function controlPage(): string {
   h3 { margin: 0; font-size: 14px; color: #eee; }
   header { display:flex; align-items:center; gap:10px; padding:10px; border-bottom:1px solid #333; }
   #status { font-size: 11px; color: #888; }
-  #listView, #terminalView { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-  #listView.hidden, #terminalView.hidden { display: none; }
+  #listView, #terminalView, #filesView { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  #listView.hidden, #terminalView.hidden, #filesView.hidden { display: none; }
   #folders { flex: 1; overflow-y: auto; padding: 8px; }
-  .folder-name { font-size: 12px; color: #999; margin: 12px 4px 4px; text-transform: uppercase; letter-spacing: .04em; }
+  .folder-heading { display: flex; align-items: center; gap: 6px; }
+  .folder-name { font-size: 12px; color: #999; margin: 12px 0 4px; text-transform: uppercase; letter-spacing: .04em; flex: 1; }
+  .folder-heading button { padding: 2px 8px; font-size: 11px; }
   .session-row {
     display: flex; align-items: center; gap: 8px; padding: 10px 8px; border-radius: 6px; cursor: pointer;
   }
@@ -262,11 +264,19 @@ function controlPage(): string {
     font-family: inherit; font-size: 13px;
   }
   button:hover { filter: brightness(1.15); }
-  #backBtn { background:#0e639c; border-color:#0e639c; color:#fff; }
-  #termTitle { flex: 1; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #backBtn, #filesBackBtn { background:#0e639c; border-color:#0e639c; color:#fff; }
+  #termTitle, #filesTitle { flex: 1; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #termContainer { flex: 1; min-height: 0; padding: 4px; touch-action: none; }
   .keys { display: flex; gap: 6px; padding: 8px; border-top: 1px solid #333; }
   .keys button { flex: 1; }
+  #filesContainer { flex: 1; overflow-y: auto; padding: 8px; }
+  .file-row { display: flex; align-items: center; gap: 8px; padding: 10px 8px; border-radius: 6px; cursor: pointer; }
+  .file-row:active { background: #2a2d2e; }
+  .file-row .name { flex: 1; font-size: 14px; word-break: break-all; }
+  #fileContent {
+    flex: 1; overflow: auto; margin: 0; padding: 12px; white-space: pre-wrap; word-break: break-word;
+    font-family: Consolas, "Courier New", monospace; font-size: 13px;
+  }
 </style>
 </head>
 <body>
@@ -296,6 +306,14 @@ function controlPage(): string {
       <button data-byte="\\u0003">Ctrl+C</button>
       <button data-byte="\\u0004">Ctrl+D</button>
     </div>
+  </div>
+
+  <div id="filesView" class="hidden">
+    <header>
+      <button id="filesBackBtn">← Back</button>
+      <div id="filesTitle"></div>
+    </header>
+    <div id="filesContainer"></div>
   </div>
 
   <script src="/vendor/xterm.js"></script>
@@ -358,6 +376,9 @@ function controlPage(): string {
     const terminalView = document.getElementById('terminalView');
     const termTitleEl = document.getElementById('termTitle');
     const termContainerEl = document.getElementById('termContainer');
+    const filesView = document.getElementById('filesView');
+    const filesTitleEl = document.getElementById('filesTitle');
+    const filesContainerEl = document.getElementById('filesContainer');
 
     function authedFetch(url, opts) {
       opts = opts || {};
@@ -378,6 +399,7 @@ function controlPage(): string {
     }
 
     const sessionNames = {};
+    const folderNames = {};
     let listPoll = null;
     async function refreshList() {
       try {
@@ -393,19 +415,39 @@ function controlPage(): string {
 
     function renderList(state) {
       foldersEl.innerHTML = '';
-      const folders = (state.folders || []).filter((f) => !f.archived && f.sessions.length > 0);
+      const folders = (state.folders || []).filter((f) => !f.archived);
       if (folders.length === 0) {
         const empty = document.createElement('div');
         empty.id = 'empty';
-        empty.textContent = 'No running sessions.';
+        empty.textContent = 'No folders yet.';
         foldersEl.appendChild(empty);
         return;
       }
       for (const folder of folders) {
+        folderNames[folder.id] = folder.name;
         const heading = document.createElement('div');
-        heading.className = 'folder-name';
-        heading.textContent = folder.name;
+        heading.className = 'folder-heading';
+        const nameEl = document.createElement('div');
+        nameEl.className = 'folder-name';
+        nameEl.textContent = folder.name;
+        heading.appendChild(nameEl);
+        const filesBtn = document.createElement('button');
+        filesBtn.textContent = '📁';
+        filesBtn.title = 'Browse files';
+        filesBtn.addEventListener('click', () => { location.hash = '#/files/' + folder.id; });
+        heading.appendChild(filesBtn);
+        const newSessionBtn = document.createElement('button');
+        newSessionBtn.textContent = '+';
+        newSessionBtn.title = 'New session';
+        newSessionBtn.addEventListener('click', () => startNewSession(folder));
+        heading.appendChild(newSessionBtn);
         foldersEl.appendChild(heading);
+        if (folder.sessions.length === 0) {
+          const none = document.createElement('div');
+          none.id = 'empty';
+          none.textContent = 'No sessions yet.';
+          foldersEl.appendChild(none);
+        }
         for (const session of folder.sessions) {
           sessionNames[session.id] = session.name;
           const row = document.createElement('div');
@@ -428,6 +470,123 @@ function controlPage(): string {
       d.textContent = s;
       return d.innerHTML;
     }
+
+    async function startNewSession(folder) {
+      const command = prompt('Command to run in ' + folder.name + ':', folder.lastCommand || 'claude');
+      if (command === null) return;
+      try {
+        const res = await authedFetch('/folder/' + folder.id + '/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command: command }),
+        });
+        const body = await res.json();
+        if (!body.ok) {
+          alert('Could not start session: ' + body.error);
+          return;
+        }
+        location.hash = '#/session/' + body.sessionId;
+      } catch (e) {
+        alert('Could not start session.');
+      }
+    }
+
+    // Read-only: browsing and viewing only, same scope as the Android app's
+    // file browser -- no create/rename/delete/edit over this remote API.
+    let currentFolderId = null;
+    let currentRelPath = '';
+    let currentFileName = null;
+
+    function joinRelPath(base, name) {
+      return base ? base + '/' + name : name;
+    }
+    function parentRelPath(p) {
+      const idx = p.lastIndexOf('/');
+      return idx === -1 ? '' : p.slice(0, idx);
+    }
+    function emptyNote(text) {
+      const d = document.createElement('div');
+      d.id = 'empty';
+      d.textContent = text;
+      return d;
+    }
+
+    async function openFiles(folderId) {
+      currentFolderId = folderId;
+      currentRelPath = '';
+      currentFileName = null;
+      await loadFilesView();
+    }
+
+    async function loadFilesView() {
+      filesTitleEl.textContent = (folderNames[currentFolderId] || currentFolderId) +
+        (currentRelPath ? '/' + currentRelPath : '') + (currentFileName ? '/' + currentFileName : '');
+      filesContainerEl.innerHTML = '';
+
+      if (currentFileName) {
+        try {
+          const res = await authedFetch(
+            '/folder/' + currentFolderId + '/file?path=' + encodeURIComponent(joinRelPath(currentRelPath, currentFileName))
+          );
+          const body = await res.json();
+          if (!body.ok) {
+            filesContainerEl.appendChild(emptyNote(body.error));
+            return;
+          }
+          const pre = document.createElement('pre');
+          pre.id = 'fileContent';
+          pre.textContent = body.content;
+          filesContainerEl.appendChild(pre);
+        } catch (e) {
+          filesContainerEl.appendChild(emptyNote('Could not load file.'));
+        }
+        return;
+      }
+
+      if (currentRelPath) {
+        const up = document.createElement('div');
+        up.className = 'file-row';
+        up.innerHTML = '<span>⬆</span><span class="name">..</span>';
+        up.addEventListener('click', () => {
+          currentRelPath = parentRelPath(currentRelPath);
+          loadFilesView();
+        });
+        filesContainerEl.appendChild(up);
+      }
+      try {
+        const res = await authedFetch('/folder/' + currentFolderId + '/files?path=' + encodeURIComponent(currentRelPath));
+        const body = await res.json();
+        if (!body.ok) {
+          filesContainerEl.appendChild(emptyNote(body.error));
+          return;
+        }
+        for (const entry of body.entries) {
+          const row = document.createElement('div');
+          row.className = 'file-row';
+          row.innerHTML = '<span>' + (entry.isDirectory ? '📁' : '📄') + '</span><span class="name">' + escapeHtml(entry.name) + '</span>';
+          row.addEventListener('click', () => {
+            if (entry.isDirectory) currentRelPath = joinRelPath(currentRelPath, entry.name);
+            else currentFileName = entry.name;
+            loadFilesView();
+          });
+          filesContainerEl.appendChild(row);
+        }
+      } catch (e) {
+        filesContainerEl.appendChild(emptyNote('Could not load folder.'));
+      }
+    }
+
+    document.getElementById('filesBackBtn').addEventListener('click', () => {
+      if (currentFileName) {
+        currentFileName = null;
+        loadFilesView();
+      } else if (currentRelPath) {
+        currentRelPath = parentRelPath(currentRelPath);
+        loadFilesView();
+      } else {
+        location.hash = '';
+      }
+    });
 
     let term = null;
     let fitAddon = null;
@@ -614,16 +773,28 @@ function controlPage(): string {
     });
 
     function route() {
-      const match = /^#\\/session\\/(.+)$/.exec(location.hash);
-      if (match) {
+      const sessionMatch = /^#\\/session\\/(.+)$/.exec(location.hash);
+      const filesMatch = /^#\\/files\\/([^/]+)$/.exec(location.hash);
+      if (sessionMatch) {
         clearInterval(listPoll);
         listView.classList.add('hidden');
+        filesView.classList.add('hidden');
         terminalView.classList.remove('hidden');
-        if (match[1] !== currentSessionId) openSession(match[1]);
+        if (sessionMatch[1] !== currentSessionId) openSession(sessionMatch[1]);
+      } else if (filesMatch) {
+        clearInterval(listPoll);
+        closeSession();
+        currentSessionId = null;
+        listView.classList.add('hidden');
+        terminalView.classList.add('hidden');
+        filesView.classList.remove('hidden');
+        if (filesMatch[1] !== currentFolderId) openFiles(filesMatch[1]);
       } else {
         closeSession();
         currentSessionId = null;
+        currentFolderId = null;
         terminalView.classList.add('hidden');
+        filesView.classList.add('hidden');
         listView.classList.remove('hidden');
         refreshList();
         clearInterval(listPoll);
