@@ -150,6 +150,19 @@ export interface WebDriverDeps {
   // user clicks Allow/Deny. remoteAddress is shown alongside the (client-
   // supplied, so spoofable) name as a second, harder-to-fake signal.
   requestPairingApproval: (name: string, remoteAddress: string) => Promise<boolean>;
+  createSession: (
+    folderId: string,
+    command: string,
+    shell?: string
+  ) => { ok: true; sessionId: string } | { ok: false; error: string };
+  listFolderDir: (
+    folderId: string,
+    relPath: string
+  ) => { ok: true; entries: { name: string; isDirectory: boolean }[] } | { ok: false; status: number; error: string };
+  readFolderFile: (
+    folderId: string,
+    relPath: string
+  ) => { ok: true; content: string } | { ok: false; status: number; error: string };
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -751,10 +764,11 @@ export function startWebDriver(deps: WebDriverDeps, port: number): Promise<WebDr
       // device's persistent credential). EventSource can't set headers, so
       // the stream route accepts it as a query param instead.
       const sessionMatch = /^\/session\/([^/]+)\/(buffer|stream|input|resize|paste-image)$/.exec(pathname);
+      const folderMatch = /^\/folder\/([^/]+)\/(session|files|file)$/.exec(pathname);
       const isStream = sessionMatch && sessionMatch[2] === 'stream';
       const suppliedToken = isStream ? query.get('token') || undefined : (req.headers['x-driver-token'] as string | undefined);
 
-      if (pathname === '/sessions' || sessionMatch) {
+      if (pathname === '/sessions' || sessionMatch || folderMatch) {
         const auth = verifyCredential(suppliedToken, token, deps);
         if (!auth.ok) {
           sendJson(res, 401, { ok: false, error: 'bad or missing driver token' });
@@ -762,6 +776,43 @@ export function startWebDriver(deps: WebDriverDeps, port: number): Promise<WebDr
         }
         if (auth.deviceId) deps.touchTrustedDevice(auth.deviceId);
       } else {
+        sendJson(res, 404, { ok: false, error: 'not found' });
+        return;
+      }
+
+      if (folderMatch) {
+        const folderId = folderMatch[1];
+        const action = folderMatch[2];
+
+        if (req.method === 'POST' && action === 'session') {
+          readBody(req)
+            .then((body) => {
+              let parsed: { command?: string; shell?: string };
+              try {
+                parsed = JSON.parse(body || '{}');
+              } catch {
+                sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+                return;
+              }
+              const result = deps.createSession(folderId, parsed.command || '', parsed.shell);
+              sendJson(res, result.ok ? 200 : 404, result);
+            })
+            .catch((e) => sendJson(res, 500, { ok: false, error: (e as Error).message }));
+          return;
+        }
+
+        if (req.method === 'GET' && action === 'files') {
+          const result = deps.listFolderDir(folderId, query.get('path') || '');
+          sendJson(res, result.ok ? 200 : result.status, result);
+          return;
+        }
+
+        if (req.method === 'GET' && action === 'file') {
+          const result = deps.readFolderFile(folderId, query.get('path') || '');
+          sendJson(res, result.ok ? 200 : result.status, result);
+          return;
+        }
+
         sendJson(res, 404, { ok: false, error: 'not found' });
         return;
       }

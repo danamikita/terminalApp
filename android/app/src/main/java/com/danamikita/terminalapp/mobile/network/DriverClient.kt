@@ -80,6 +80,25 @@ class DriverClient(
         parseAppState(executeForBody(authedRequest("/sessions").build()))
     }
 
+    suspend fun createSession(folderId: String, command: String, shell: String? = null): String =
+        withContext(Dispatchers.IO) {
+            val body = JSONObject().put("command", command).apply {
+                if (shell != null) put("shell", shell)
+            }.toString().toRequestBody(jsonMedia)
+            val req = authedRequest("/folder/$folderId/session").post(body).build()
+            JSONObject(executeForBody(req)).getString("sessionId")
+        }
+
+    suspend fun listFolderDir(folderId: String, relPath: String): List<DirEntry> = withContext(Dispatchers.IO) {
+        val encoded = java.net.URLEncoder.encode(relPath, "UTF-8")
+        parseDirEntries(executeForBody(authedRequest("/folder/$folderId/files?path=$encoded").build()))
+    }
+
+    suspend fun readFolderFile(folderId: String, relPath: String): String = withContext(Dispatchers.IO) {
+        val encoded = java.net.URLEncoder.encode(relPath, "UTF-8")
+        JSONObject(executeForBody(authedRequest("/folder/$folderId/file?path=$encoded").build())).getString("content")
+    }
+
     suspend fun getBuffer(sessionId: String): String = withContext(Dispatchers.IO) {
         val json = executeForBody(authedRequest("/session/$sessionId/buffer").build())
         JSONObject(json).optString("data", "")

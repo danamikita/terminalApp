@@ -29,6 +29,7 @@ import com.danamikita.terminalapp.mobile.discovery.NsdDiscovery
 import com.danamikita.terminalapp.mobile.network.DriverClient
 import com.danamikita.terminalapp.mobile.storage.DeviceStore
 import com.danamikita.terminalapp.mobile.ui.ConnectScreen
+import com.danamikita.terminalapp.mobile.ui.FileBrowserScreen
 import com.danamikita.terminalapp.mobile.ui.SessionListScreen
 import com.danamikita.terminalapp.mobile.ui.TerminalScreen
 import com.danamikita.terminalapp.mobile.update.UpdateChecker
@@ -120,6 +121,7 @@ class MainActivity : ComponentActivity() {
                     var activeClient by remember { mutableStateOf<DriverClient?>(null) }
                     var activeLabel by remember { mutableStateOf("") }
                     var activeSessionName by remember { mutableStateOf("") }
+                    var activeFolderName by remember { mutableStateOf("") }
 
                     NavHost(navController = navController, startDestination = "connect") {
                         composable("connect") {
@@ -146,6 +148,11 @@ class MainActivity : ComponentActivity() {
                                         val encodedId = URLEncoder.encode(session.id, "UTF-8")
                                         navController.navigate("terminal/$encodedId")
                                     },
+                                    onBrowseFolder = { folder ->
+                                        activeFolderName = folder.name
+                                        val encodedId = URLEncoder.encode(folder.id, "UTF-8")
+                                        navController.navigate("files/$encodedId")
+                                    },
                                     onUnauthorized = {
                                         activeClient = null
                                         navController.popBackStack("connect", inclusive = false)
@@ -170,6 +177,27 @@ class MainActivity : ComponentActivity() {
                                     client = client,
                                     sessionId = sessionId,
                                     sessionName = activeSessionName,
+                                    onUnauthorized = {
+                                        activeClient = null
+                                        navController.popBackStack("connect", inclusive = false)
+                                    },
+                                )
+                            }
+                        }
+                        composable(
+                            "files/{folderId}",
+                            arguments = listOf(navArgument("folderId") { type = NavType.StringType }),
+                        ) { backStackEntry ->
+                            val client = activeClient
+                            val encodedId = backStackEntry.arguments?.getString("folderId").orEmpty()
+                            val folderId = URLDecoder.decode(encodedId, "UTF-8")
+                            if (client == null) {
+                                navController.popBackStack("connect", inclusive = false)
+                            } else {
+                                FileBrowserScreen(
+                                    client = client,
+                                    folderId = folderId,
+                                    folderName = activeFolderName,
                                     onUnauthorized = {
                                         activeClient = null
                                         navController.popBackStack("connect", inclusive = false)

@@ -27,6 +27,18 @@ data class AppStateInfo(
     val folders: List<FolderInfo>,
 )
 
+data class DirEntry(
+    val name: String,
+    val isDirectory: Boolean,
+)
+
+fun parseDirEntries(json: String): List<DirEntry> {
+    val obj = JSONObject(json)
+    return obj.optJSONArray("entries").orEmpty().map { e ->
+        DirEntry(name = e.getString("name"), isDirectory = e.getBoolean("isDirectory"))
+    }
+}
+
 fun parseAppState(json: String): AppStateInfo {
     val obj = JSONObject(json)
     val folders = obj.optJSONArray("folders").orEmpty().map { f ->

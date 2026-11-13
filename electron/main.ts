@@ -135,6 +135,19 @@ function pathIsValidDir(p: string): boolean {
   }
 }
 
+// The one thing standing between a paired remote device and arbitrary
+// filesystem reads: every folder-scoped web-driver route resolves its
+// relPath through here first. Returns null for anything that escapes the
+// folder's own root (`..` segments, absolute paths, symlink tricks handled
+// by resolving before comparing), never the resolved path of something
+// outside it.
+function resolveWithinFolder(folder: FolderState, relPath: string): string | null {
+  const root = path.resolve(folder.path);
+  const resolved = path.resolve(root, relPath || '.');
+  if (resolved !== root && !resolved.startsWith(root + path.sep)) return null;
+  return resolved;
+}
+
 function buildResumeCommand(command: string): string {
   const trimmed = command.trim();
   const firstToken = trimmed.split(/\s+/)[0];
@@ -481,19 +494,33 @@ ipcMain.handle('app:reorder-folders', (_e, args: { orderedIds: string[] }) => {
   return { ok: true, state: getState() };
 });
 
-ipcMain.handle('app:create-session', (_e, args: { folderId: string; command: string; shell?: ShellType }) => {
-  const folder = findFolder(args.folderId);
-  if (!folder) return { ok: false, error: 'Folder not found', state: getState() };
-  const command = args.command.trim() || 'claude';
-  const shell = args.shell || folder.lastShell || defaultShell;
+// Shared by the app:create-session IPC handler and the web-driver's
+// POST /folder/:id/session route, so a remotely-created session goes
+// through the exact same folder lookup, command/shell defaulting, and
+// persistence as one started from the desktop UI.
+function createSessionInFolder(
+  folderId: string,
+  rawCommand: string,
+  rawShell?: ShellType
+): { ok: true; sessionId: string } | { ok: false; error: string } {
+  const folder = findFolder(folderId);
+  if (!folder) return { ok: false, error: 'Folder not found' };
+  const command = rawCommand.trim() || 'claude';
+  const shell = rawShell || folder.lastShell || defaultShell;
   folder.lastCommand = command;
   folder.lastShell = shell;
   persist();
 
   const result = createSessionForFolder(folder, command, shell);
-  if ('error' in result) return { ok: false, error: result.error, state: getState() };
+  if ('error' in result) return { ok: false, error: result.error };
 
-  return { ok: true, state: getState(), sessionId: result.id };
+  return { ok: true, sessionId: result.id };
+}
+
+ipcMain.handle('app:create-session', (_e, args: { folderId: string; command: string; shell?: ShellType }) => {
+  const result = createSessionInFolder(args.folderId, args.command, args.shell);
+  if (!result.ok) return { ok: false, error: result.error, state: getState() };
+  return { ok: true, state: getState(), sessionId: result.sessionId };
 });
 
 ipcMain.handle('app:popup-menu', (_e, args: { items: { id: string; label: string }[] }) => {
@@ -571,6 +598,51 @@ ipcMain.handle('fs:list-dir', (_e, args: { dirPath: string }) => {
     return { ok: false, error: (e as Error).message };
   }
 });
+
+// Folder-scoped counterparts of fs:list-dir / fs:read-file below, used by
+// the web-driver's GET /folder/:id/files and /folder/:id/file routes. A
+// status is returned alongside ok:false so the route can tell "folder/path
+// doesn't exist" (404) apart from "relPath escapes the folder root" (400).
+function listFolderDirSafe(
+  folderId: string,
+  relPath: string
+): { ok: true; entries: { name: string; isDirectory: boolean }[] } | { ok: false; status: number; error: string } {
+  const folder = findFolder(folderId);
+  if (!folder) return { ok: false, status: 404, error: 'Folder not found' };
+  const resolved = resolveWithinFolder(folder, relPath);
+  if (!resolved) return { ok: false, status: 400, error: 'Path escapes the folder root' };
+  try {
+    const entries = fs
+      .readdirSync(resolved, { withFileTypes: true })
+      .map((d) => ({ name: d.name, isDirectory: d.isDirectory() }))
+      .sort((a, b) => {
+        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+    return { ok: true, entries };
+  } catch (e) {
+    return { ok: false, status: 404, error: (e as Error).message };
+  }
+}
+
+function readFolderFileSafe(
+  folderId: string,
+  relPath: string
+): { ok: true; content: string } | { ok: false; status: number; error: string } {
+  const folder = findFolder(folderId);
+  if (!folder) return { ok: false, status: 404, error: 'Folder not found' };
+  const resolved = resolveWithinFolder(folder, relPath);
+  if (!resolved) return { ok: false, status: 400, error: 'Path escapes the folder root' };
+  try {
+    const stat = fs.statSync(resolved);
+    if (stat.size > 5 * 1024 * 1024) {
+      return { ok: false, status: 400, error: 'File too large to preview (over 5MB).' };
+    }
+    return { ok: true, content: fs.readFileSync(resolved, 'utf8') };
+  } catch (e) {
+    return { ok: false, status: 404, error: (e as Error).message };
+  }
+}
 
 ipcMain.handle('fs:read-file', (_e, args: { filePath: string }) => {
   try {
@@ -759,6 +831,13 @@ ipcMain.handle('app:toggle-web-driver', async (_e, args: { enabled: boolean }) =
         },
         touchTrustedDevice,
         requestPairingApproval,
+        createSession: (folderId, command, shell) => {
+          const result = createSessionInFolder(folderId, command, shell as ShellType | undefined);
+          if (result.ok) pushState();
+          return result;
+        },
+        listFolderDir: listFolderDirSafe,
+        readFolderFile: readFolderFileSafe,
       },
       WEB_DRIVER_PORT
     );
