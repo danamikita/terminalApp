@@ -85,6 +85,10 @@ reinstall manually after the first time.
 > "More info" → "Run anyway" to proceed. This doesn't affect auto-updates
 > once installed.
 
+There's also a native Android companion app for remote-controlling your
+running sessions from your phone — see the Web Driver feature above. Get it
+on [Google Play](https://play.google.com/store/apps/details?id=com.pragmaticbytes.folderminal).
+
 ## Getting started (from source)
 
 ### Prerequisites

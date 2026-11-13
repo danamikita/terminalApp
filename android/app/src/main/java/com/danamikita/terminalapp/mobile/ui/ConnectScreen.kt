@@ -28,7 +28,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.danamikita.terminalapp.mobile.discovery.NsdDiscovery
 import com.danamikita.terminalapp.mobile.network.DriverClient
@@ -187,6 +190,19 @@ fun ConnectScreen(
             ) { Text("Connect") }
 
             errorText?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+
+            Divider(modifier = Modifier.padding(vertical = 12.dp))
+            val context = LocalContext.current
+            Text(
+                "Need the desktop app? Get it from GitHub",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.clickable {
+                    context.startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/danamikita/terminalApp/releases/latest"))
+                    )
+                },
+            )
         }
     }
 
