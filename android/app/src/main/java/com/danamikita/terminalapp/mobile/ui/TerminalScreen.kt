@@ -230,7 +230,17 @@ fun TerminalScreen(
                 // still suppresses autocorrect on this plain-text variation.
                 keyboardOptions = KeyboardOptions(autoCorrectEnabled = false, keyboardType = KeyboardType.Text),
                 onValueChange = onChange@{ new ->
-                    val old = fieldValue.text
+                    // An active IME composition means the IME is still mid-utterance --
+                    // continuous voice dictation keeps one open across each interim
+                    // transcript, extending/correcting it as you keep talking. Mirror the
+                    // value back as-is instead of resetting: clobbering the field mid-
+                    // composition looks to the IME like an external edit, which makes
+                    // Gboard abandon dictation after just the first word.
+                    if (new.composition != null) {
+                        fieldValue = new
+                        return@onChange
+                    }
+                    val old = SENTINEL
                     fun isReplay(): Boolean {
                         val now = SystemClock.uptimeMillis()
                         if (new.text == lastRawValue && now - lastRawValueAtMs < REPLAY_SUPPRESSION_WINDOW_MS) return true
