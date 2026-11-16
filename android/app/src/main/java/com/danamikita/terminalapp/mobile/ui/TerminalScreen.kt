@@ -48,6 +48,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.danamikita.terminalapp.mobile.network.DriverClient
 import com.danamikita.terminalapp.mobile.network.UnauthorizedException
 import com.danamikita.terminalapp.mobile.terminal.NoopTerminalSessionClient
@@ -127,7 +130,27 @@ fun TerminalScreen(
         pickImageLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
     }
 
-    DisposableEffect(sessionId) {
+    // The screen turning off and back on silently kills the SSE stream's
+    // underlying socket without ever surfacing an error on it (OkHttp's
+    // blocking read just hangs on the half-dead connection, readTimeout is
+    // 0/infinite for this long-lived stream) -- so nothing short of leaving
+    // and re-entering the screen used to notice. Bumping this on every
+    // ON_RESUME forces the effect below to tear down whatever connection it
+    // had and open a fresh one, which is exactly what re-entering did.
+    var connectionGeneration by remember { mutableStateOf(0) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        var resumedBefore = false
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                if (resumedBefore) connectionGeneration++ else resumedBefore = true
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    DisposableEffect(sessionId, connectionGeneration) {
         var cancelled = false
         var activeCall: okhttp3.Call? = null
         val output = RemoteTerminalOutput(onInput = { data, offset, count ->
