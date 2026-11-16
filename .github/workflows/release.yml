@@ -27,8 +27,20 @@ jobs:
       # Pre-create the release so electron-builder attaches assets to it
       # instead of racing to create one itself — when it does that across
       # multiple artifacts it can create duplicate releases for the same tag.
+      # Checks for an existing release first (rather than creating
+      # unconditionally) so re-running this job after a later step failed
+      # — e.g. the Play publish step hitting a transient Play Console
+      # conflict — doesn't die here on "tag_name already exists" before
+      # ever reaching the step that actually needed retrying.
       - name: Create GitHub release
-        run: gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --notes "Automated release"
+        shell: pwsh
+        run: |
+          gh release view "${{ github.ref_name }}" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release ${{ github.ref_name }} already exists -- reusing it."
+          } else {
+            gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --notes "Automated release"
+          }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -70,7 +82,9 @@ jobs:
         run: |
           $dest = "Folderminal-${{ github.ref_name }}.apk"
           Copy-Item "android\app\build\outputs\apk\sideload\release\app-sideload-release.apk" $dest
-          gh release upload "${{ github.ref_name }}" $dest
+          # --clobber: a re-run of this job (e.g. retrying a later step that
+          # failed) re-uploads the same-named asset rather than erroring on it.
+          gh release upload "${{ github.ref_name }}" $dest --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
