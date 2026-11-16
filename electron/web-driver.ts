@@ -273,6 +273,7 @@ function controlPage(): string {
   .file-row { display: flex; align-items: center; gap: 8px; padding: 10px 8px; border-radius: 6px; cursor: pointer; }
   .file-row:active { background: #2a2d2e; }
   .file-row .name { flex: 1; font-size: 14px; word-break: break-all; }
+  .file-row button { padding: 2px 8px; font-size: 11px; }
   #fileContent {
     flex: 1; overflow: auto; margin: 0; padding: 12px; white-space: pre-wrap; word-break: break-word;
     font-family: Consolas, "Courier New", monospace; font-size: 13px;
@@ -511,6 +512,45 @@ function controlPage(): string {
       return d;
     }
 
+    // Mirrors SCRIPT_RUNNERS in renderer.js -- kept in sync by hand since this
+    // page is served as a standalone string, not built from a shared module.
+    const SCRIPT_RUNNERS = {
+      '.ps1': { shell: 'powershell', build: (p) => '& "' + p + '"' },
+      '.bat': { shell: 'cmd', build: (p) => '"' + p + '"' },
+      '.cmd': { shell: 'cmd', build: (p) => '"' + p + '"' },
+      '.sh': { shell: 'bash', build: (p) => '"' + p + '"' },
+      '.py': { build: (p) => 'python "' + p + '"' },
+      '.js': { build: (p) => 'node "' + p + '"' },
+      '.mjs': { build: (p) => 'node "' + p + '"' },
+      '.cjs': { build: (p) => 'node "' + p + '"' },
+      '.rb': { build: (p) => 'ruby "' + p + '"' },
+      '.pl': { build: (p) => 'perl "' + p + '"' },
+    };
+    function scriptRunnerFor(name) {
+      const idx = name.lastIndexOf('.');
+      if (idx === -1) return null;
+      return SCRIPT_RUNNERS[name.slice(idx).toLowerCase()] || null;
+    }
+
+    async function runScriptInNewSession(folderId, relPath, runner) {
+      if (!confirm('Run ' + relPath + ' in a new session?')) return;
+      try {
+        const res = await authedFetch('/folder/' + folderId + '/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command: runner.build(relPath), shell: runner.shell }),
+        });
+        const body = await res.json();
+        if (!body.ok) {
+          alert('Could not start session: ' + body.error);
+          return;
+        }
+        location.hash = '#/session/' + body.sessionId;
+      } catch (e) {
+        alert('Could not start session.');
+      }
+    }
+
     async function openFiles(folderId) {
       currentFolderId = folderId;
       currentRelPath = '';
@@ -569,6 +609,26 @@ function controlPage(): string {
             else currentFileName = entry.name;
             loadFilesView();
           });
+          if (!entry.isDirectory) {
+            const runner = scriptRunnerFor(entry.name);
+            if (runner) {
+              const relPath = joinRelPath(currentRelPath, entry.name);
+              const runBtn = document.createElement('button');
+              runBtn.textContent = '▶';
+              runBtn.title = 'Run in new session';
+              runBtn.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                runScriptInNewSession(currentFolderId, relPath, runner);
+              });
+              row.appendChild(runBtn);
+              // Right-click mirrors the desktop app's file-browser convention
+              // for devices opening this page from a mouse-equipped browser.
+              row.addEventListener('contextmenu', (ev) => {
+                ev.preventDefault();
+                runScriptInNewSession(currentFolderId, relPath, runner);
+              });
+            }
+          }
           filesContainerEl.appendChild(row);
         }
       } catch (e) {

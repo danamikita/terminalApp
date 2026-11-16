@@ -202,6 +202,11 @@ class MainActivity : ComponentActivity() {
                                         activeClient = null
                                         navController.popBackStack("connect", inclusive = false)
                                     },
+                                    onRunScript = { sessionId, label ->
+                                        activeSessionName = label
+                                        val encodedSessionId = URLEncoder.encode(sessionId, "UTF-8")
+                                        navController.navigate("terminal/$encodedSessionId")
+                                    },
                                 )
                             }
                         }
