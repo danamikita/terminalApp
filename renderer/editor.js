@@ -51,6 +51,16 @@ function languageExtensionFor(filePath, isMarkdown) {
     case 'markdown':
       return [markdown()];
     case 'xml':
+    case 'config':
+    case 'csproj':
+    case 'vbproj':
+    case 'props':
+    case 'targets':
+    case 'resx':
+    case 'nuspec':
+    case 'xsd':
+    case 'xsl':
+    case 'xslt':
       return [xml()];
     case 'yml':
     case 'yaml':
