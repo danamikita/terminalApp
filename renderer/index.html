@@ -38,11 +38,24 @@
       <div id="main-body">
         <div id="slot-files" class="slot">
           <div id="files-empty" class="pane-empty">Click <strong>Files</strong> under a folder to browse it.</div>
-          <div id="file-browser" class="pane"></div>
-          <div id="markdown-preview" class="pane"></div>
-          <div id="editor-pane" class="pane"></div>
+          <div id="files-pane" class="pane">
+            <div id="files-tree">
+              <div id="files-tree-header">
+                <span id="files-tree-breadcrumb"></span>
+                <button id="files-search-toggle" class="files-search-toggle" title="Search in files (Ctrl+Shift+F)">🔎</button>
+              </div>
+              <div id="files-tree-body"></div>
+            </div>
+            <div id="files-tabs">
+              <div id="files-tabbar"></div>
+              <div id="files-content">
+                <div id="files-tabs-empty" class="pane-empty">Select a file to open it.</div>
+                <div id="files-monaco-host"></div>
+                <div id="files-preview-host"></div>
+              </div>
+            </div>
+          </div>
           <div id="git-panel" class="pane"></div>
-          <div id="search-panel" class="pane"></div>
         </div>
         <div id="slot-terminal" class="slot">
           <div id="terminal-empty" class="pane-empty">Select a session, or create one with the <strong>+</strong> next to a folder.</div>

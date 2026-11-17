@@ -14,7 +14,7 @@ const sessionTerms = new Map(); // sessionId -> { term, fitAddon, container }
 const folderBrowseDir = new Map(); // folderId -> last-browsed directory (sticky)
 const gitInfo = new Map(); // folderId -> GitInfo
 const ideMatches = new Map(); // folderId -> [{ ruleId, label, fileName }]
-let filesPanelState = null; // null | { folderId, view: 'listing'|'markdown', markdownPath?, markdownReturnDir? }
+let filesPanelState = null; // null | { folderId, view: 'files'|'git' }
 let activeSessionId = null;
 let singleModeShowing = 'placeholder'; // 'placeholder' | 'files' | 'session' -- which slot wins when not split
 let splitMode = false;
@@ -33,11 +33,11 @@ const slotFilesEl = document.getElementById('slot-files');
 const slotTerminalEl = document.getElementById('slot-terminal');
 const filesEmptyEl = document.getElementById('files-empty');
 const terminalEmptyEl = document.getElementById('terminal-empty');
-const fileBrowserEl = document.getElementById('file-browser');
-const markdownPreviewEl = document.getElementById('markdown-preview');
-const editorPaneEl = document.getElementById('editor-pane');
+const filesPaneEl = document.getElementById('files-pane');
+const filesTreeBreadcrumbEl = document.getElementById('files-tree-breadcrumb');
+const filesTreeBodyEl = document.getElementById('files-tree-body');
+const filesSearchToggleBtn = document.getElementById('files-search-toggle');
 const gitPanelEl = document.getElementById('git-panel');
-const searchPanelEl = document.getElementById('search-panel');
 const splitToggleBtn = document.getElementById('split-toggle');
 const autoResumeToggleBtn = document.getElementById('auto-resume-toggle');
 const checkUpdateBtn = document.getElementById('check-update-btn');
@@ -348,24 +348,13 @@ function renderSidebar() {
       const filesRow = el('div', 'session-row');
       filesRow.dataset.testid = 'files-row';
       filesRow.dataset.folderId = folder.id;
-      if (filesPanelState && filesPanelState.folderId === folder.id && (splitMode || singleModeShowing === 'files')) {
+      if (filesPanelState && filesPanelState.folderId === folder.id && filesPanelState.view === 'files' && (splitMode || singleModeShowing === 'files')) {
         filesRow.classList.add('selected');
       }
       filesRow.appendChild(el('span', 'status-dot', '📂'));
       filesRow.appendChild(el('span', 'session-name', 'Files'));
       filesRow.addEventListener('click', () => openFilesForFolder(folder));
       folderListEl.appendChild(filesRow);
-
-      const searchRow = el('div', 'session-row');
-      searchRow.dataset.testid = 'search-row';
-      searchRow.dataset.folderId = folder.id;
-      if (filesPanelState && filesPanelState.folderId === folder.id && filesPanelState.view === 'search' && (splitMode || singleModeShowing === 'files')) {
-        searchRow.classList.add('selected');
-      }
-      searchRow.appendChild(el('span', 'status-dot', '🔎'));
-      searchRow.appendChild(el('span', 'session-name', 'Search'));
-      searchRow.addEventListener('click', () => openSearchForFolder(folder));
-      folderListEl.appendChild(searchRow);
 
       const info = gitInfo.get(folder.id);
       if (info && info.isRepo) {
@@ -550,11 +539,8 @@ function applyLayout() {
 
   const hasFiles = filesPanelState !== null;
   filesEmptyEl.classList.toggle('visible', !hasFiles);
-  fileBrowserEl.classList.toggle('visible', hasFiles && filesPanelState.view === 'listing');
-  markdownPreviewEl.classList.toggle('visible', hasFiles && filesPanelState.view === 'markdown');
-  editorPaneEl.classList.toggle('visible', hasFiles && filesPanelState.view === 'editor');
+  filesPaneEl.classList.toggle('visible', hasFiles && filesPanelState.view === 'files');
   gitPanelEl.classList.toggle('visible', hasFiles && filesPanelState.view === 'git');
-  searchPanelEl.classList.toggle('visible', hasFiles && filesPanelState.view === 'search');
 
   const hasSession = activeSessionId !== null;
   terminalEmptyEl.classList.toggle('visible', !hasSession);
@@ -702,13 +688,34 @@ function openFilesForFolder(folder) {
 }
 
 function showFilesListing(folder, dirPath) {
-  filesPanelState = { folderId: folder.id, view: 'listing' };
+  filesPanelState = { folderId: folder.id, view: 'files' };
   folderBrowseDir.set(folder.id, dirPath);
   singleModeShowing = 'files';
   applyLayout();
   renderSidebar();
-  renderFileBrowserContents(folder, dirPath);
+  renderFilesTree(folder);
+  showFilesTabsFor(folder);
 }
+
+// Renders the left-hand tree column: breadcrumb + search toggle in the
+// header, and either the directory listing or (when search mode is on for
+// this folder, tracked by search-panel.js's searchPanelState) the inline
+// search box/results in the body.
+function renderFilesTree(folder) {
+  const dirPath = folderBrowseDir.get(folder.id) || folder.path;
+  filesTreeBreadcrumbEl.textContent = dirPath;
+  const searching = searchPanelState && searchPanelState.folderId === folder.id;
+  filesSearchToggleBtn.classList.toggle('active', !!searching);
+  if (searching) renderSearchPanel(folder);
+  else renderFileBrowserContents(folder, dirPath);
+}
+
+filesSearchToggleBtn.addEventListener('click', () => {
+  const folder = filesPanelState && state.folders.find((f) => f.id === filesPanelState.folderId);
+  if (!folder) return;
+  if (searchPanelState && searchPanelState.folderId === folder.id) closeSearchMode(folder);
+  else openSearchForFolder(folder);
+});
 
 const BINARY_EXT = /\.(png|jpe?g|gif|bmp|ico|webp|pdf|zip|7z|rar|exe|dll|so|dylib|mp3|mp4|mov|wav|ttf|woff2?|bin)$/i;
 
@@ -747,8 +754,7 @@ async function runScriptInNewSession(folder, filePath, runner) {
 }
 
 async function renderFileBrowserContents(folder, dirPath) {
-  fileBrowserEl.innerHTML = '';
-  fileBrowserEl.appendChild(el('div', 'fb-breadcrumb', dirPath));
+  filesTreeBodyEl.innerHTML = '';
 
   const normalizedCurrent = path.resolve(dirPath);
   const normalizedRoot = path.resolve(folder.path);
@@ -757,12 +763,12 @@ async function renderFileBrowserContents(folder, dirPath) {
     up.appendChild(el('span', 'fb-icon', '⬆'));
     up.appendChild(el('span', 'fb-name', '..'));
     up.addEventListener('click', () => showFilesListing(folder, path.dirname(dirPath)));
-    fileBrowserEl.appendChild(up);
+    filesTreeBodyEl.appendChild(up);
   }
 
   const res = await ipcRenderer.invoke('fs:list-dir', { dirPath });
   if (!res.ok) {
-    fileBrowserEl.appendChild(el('div', 'empty-hint', res.error));
+    filesTreeBodyEl.appendChild(el('div', 'empty-hint', res.error));
     return;
   }
 
@@ -781,9 +787,8 @@ async function renderFileBrowserContents(folder, dirPath) {
       row.appendChild(el('span', 'fb-icon', isMd ? '📝' : '📄'));
       row.appendChild(el('span', 'fb-name', entry.name));
       row.addEventListener('click', () => {
-        if (isMd) showMarkdownPreview(folder, full, dirPath);
-        else if (isBinary) ipcRenderer.invoke('fs:open-external', { filePath: full });
-        else openFileInEditor(folder, full, false);
+        if (isBinary) ipcRenderer.invoke('fs:open-external', { filePath: full });
+        else openFileInEditor(folder, full, isMd);
       });
       if (runner) {
         row.addEventListener('contextmenu', (ev) => {
@@ -792,37 +797,8 @@ async function renderFileBrowserContents(folder, dirPath) {
         });
       }
     }
-    fileBrowserEl.appendChild(row);
+    filesTreeBodyEl.appendChild(row);
   }
-}
-
-function showMarkdownPreview(folder, filePath, returnDir) {
-  filesPanelState = { folderId: folder.id, view: 'markdown', markdownPath: filePath, markdownReturnDir: returnDir };
-  singleModeShowing = 'files';
-  applyLayout();
-  renderSidebar();
-
-  markdownPreviewEl.innerHTML = '';
-  const backBtn = el('button', 'md-back', '← Back to files');
-  backBtn.addEventListener('click', () => showFilesListing(folder, returnDir));
-  markdownPreviewEl.appendChild(backBtn);
-
-  const editBtn = el('button', 'md-edit', '✎ Edit');
-  editBtn.addEventListener('click', () => openFileInEditor(folder, filePath, true));
-  markdownPreviewEl.appendChild(editBtn);
-
-  const body = el('div');
-  body.id = 'markdown-body';
-  markdownPreviewEl.appendChild(body);
-
-  ipcRenderer.invoke('fs:read-file', { filePath }).then((res) => {
-    if (!res.ok) {
-      body.textContent = `Error: ${res.error}`;
-      return;
-    }
-    body.innerHTML = DOMPurify.sanitize(parseMarkdown(res.content));
-    addCodeBlockCopyButtons(body);
-  });
 }
 
 function addCodeBlockCopyButtons(body) {

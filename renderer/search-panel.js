@@ -4,23 +4,35 @@ let searchPanelState = null; // { folderId, query, caseSensitive, results, loadi
 let searchDebounceTimer = null;
 
 function openSearchForFolder(folder) {
-  filesPanelState = { folderId: folder.id, view: 'search' };
   searchPanelState = { folderId: folder.id, query: '', caseSensitive: false, results: null, loading: false, error: null };
-  singleModeShowing = 'files';
-  applyLayout();
-  renderSidebar();
-  renderSearchPanel(folder);
+  const alreadyShowing = filesPanelState && filesPanelState.folderId === folder.id && filesPanelState.view === 'files';
+  if (alreadyShowing) {
+    renderFilesTree(folder);
+  } else {
+    // Bring this folder's Files screen into view first (mirrors
+    // showFilesListing), then layer search mode on top of it.
+    filesPanelState = { folderId: folder.id, view: 'files' };
+    singleModeShowing = 'files';
+    applyLayout();
+    renderSidebar();
+    renderFilesTree(folder);
+    showFilesTabsFor(folder);
+  }
 }
 
+function closeSearchMode(folder) {
+  searchPanelState = null;
+  renderFilesTree(folder);
+}
+
+// Renders into #files-tree-body (renderFilesTree in renderer.js routes here
+// instead of the directory listing whenever searchPanelState is active for
+// the folder currently shown).
 function renderSearchPanel(folder) {
   if (!searchPanelState || searchPanelState.folderId !== folder.id) return;
-  searchPanelEl.innerHTML = '';
+  filesTreeBodyEl.innerHTML = '';
 
   const header = el('div', 'search-panel-header');
-
-  const backBtn = el('button', 'md-back', '← Back to files');
-  backBtn.addEventListener('click', () => showFilesListing(folder, folderBrowseDir.get(folder.id) || folder.path));
-  header.appendChild(backBtn);
 
   const input = document.createElement('input');
   input.type = 'text';
@@ -35,7 +47,7 @@ function renderSearchPanel(folder) {
     searchDebounceTimer = setTimeout(() => runFolderSearch(folder), 250);
   });
   input.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Escape') showFilesListing(folder, folderBrowseDir.get(folder.id) || folder.path);
+    if (ev.key === 'Escape') closeSearchMode(folder);
   });
   header.appendChild(input);
 
@@ -48,10 +60,10 @@ function renderSearchPanel(folder) {
   });
   header.appendChild(caseBtn);
 
-  searchPanelEl.appendChild(header);
+  filesTreeBodyEl.appendChild(header);
 
   const body = el('div', 'search-panel-body');
-  searchPanelEl.appendChild(body);
+  filesTreeBodyEl.appendChild(body);
 
   if (searchPanelState.loading) {
     body.appendChild(el('div', 'empty-hint', 'Searching…'));
@@ -65,7 +77,7 @@ function renderSearchPanel(folder) {
     renderSearchResults(folder, body, searchPanelState.results);
   }
 
-  const focusInput = searchPanelEl.querySelector('.search-panel-input');
+  const focusInput = filesTreeBodyEl.querySelector('.search-panel-input');
   if (focusInput) {
     const pos = focusInput.value.length;
     focusInput.focus();
@@ -135,8 +147,10 @@ async function runFolderSearch(folder) {
 }
 
 async function openSearchResult(folder, result) {
-  const isMd = /\.(md|markdown)$/i.test(result.relPath);
-  await openFileInEditor(folder, result.absPath, isMd);
+  // Force edit mode (not preview) even for markdown so the matched line is
+  // actually visible — revealLineInEditor flips it to edit too, but opening
+  // it that way from the start avoids a flash of the rendered preview.
+  await openFileInEditor(folder, result.absPath, false);
   revealLineInEditor(folder, result.absPath, result.line, result.col);
 }
 
@@ -227,8 +241,7 @@ function chooseQuickOpenItem(i) {
   if (!item || !folder) return;
   closeQuickOpen();
   const isMd = /\.(md|markdown)$/i.test(item.relPath);
-  if (isMd) showMarkdownPreview(folder, item.absPath, path.dirname(item.absPath));
-  else openFileInEditor(folder, item.absPath, false);
+  openFileInEditor(folder, item.absPath, isMd);
 }
 
 quickOpenInput.addEventListener('input', () => {
