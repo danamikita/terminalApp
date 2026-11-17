@@ -829,6 +829,13 @@ ipcMain.handle('app:toggle-web-driver', async (_e, args: { enabled: boolean }) =
           s.resize(cols, rows);
           return true;
         },
+        renameSession: (id, name) => {
+          const s = findSession(id);
+          if (!s) return false;
+          s.rename(name);
+          pushState();
+          return true;
+        },
         listTrustedDevices: () => trustedDevices,
         addTrustedDevice: (device) => {
           trustedDevices.push(device);

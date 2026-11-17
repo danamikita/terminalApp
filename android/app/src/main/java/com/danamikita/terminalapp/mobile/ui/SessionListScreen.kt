@@ -65,6 +65,11 @@ fun SessionListScreen(
     var creatingSession by remember { mutableStateOf(false) }
     var createError by remember { mutableStateOf<String?>(null) }
 
+    var sessionToRename by remember { mutableStateOf<SessionInfo?>(null) }
+    var renameInput by remember { mutableStateOf("") }
+    var renaming by remember { mutableStateOf(false) }
+    var renameError by remember { mutableStateOf<String?>(null) }
+
     LaunchedEffect(client) {
         while (isActive) {
             try {
@@ -106,6 +111,32 @@ fun SessionListScreen(
             } catch (e: Exception) {
                 creatingSession = false
                 createError = e.message
+            }
+        }
+    }
+
+    fun openRenameDialog(session: SessionInfo) {
+        sessionToRename = session
+        renameInput = session.name
+        renameError = null
+    }
+
+    fun submitRename() {
+        val session = sessionToRename ?: return
+        val name = renameInput
+        renaming = true
+        renameError = null
+        scope.launch {
+            try {
+                client.renameSession(session.id, name)
+                state = client.listSessions()
+                sessionToRename = null
+                renaming = false
+            } catch (e: UnauthorizedException) {
+                onUnauthorized()
+            } catch (e: Exception) {
+                renaming = false
+                renameError = e.message
             }
         }
     }
@@ -157,7 +188,11 @@ fun SessionListScreen(
                         }
                     }
                     items(folder.sessions) { session ->
-                        SessionRow(session, onClick = { onOpenSession(session) })
+                        SessionRow(
+                            session,
+                            onClick = { onOpenSession(session) },
+                            onRename = { openRenameDialog(session) },
+                        )
                         Divider()
                     }
                 }
@@ -189,15 +224,40 @@ fun SessionListScreen(
             },
         )
     }
+
+    sessionToRename?.let {
+        AlertDialog(
+            onDismissRequest = { if (!renaming) sessionToRename = null },
+            title = { Text("Rename session") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = renameInput,
+                        onValueChange = { renameInput = it },
+                        label = { Text("Name") },
+                        enabled = !renaming,
+                    )
+                    renameError?.let { err -> Text(err, color = MaterialTheme.colorScheme.error) }
+                    if (renaming) CircularProgressIndicator(modifier = Modifier.padding(top = 8.dp))
+                }
+            },
+            confirmButton = {
+                TextButton(enabled = !renaming && renameInput.isNotBlank(), onClick = { submitRename() }) { Text("Rename") }
+            },
+            dismissButton = {
+                TextButton(enabled = !renaming, onClick = { sessionToRename = null }) { Text("Cancel") }
+            },
+        )
+    }
 }
 
 @Composable
-private fun SessionRow(session: SessionInfo, onClick: () -> Unit) {
+private fun SessionRow(session: SessionInfo, onClick: () -> Unit, onRename: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -212,5 +272,6 @@ private fun SessionRow(session: SessionInfo, onClick: () -> Unit) {
             Text(it, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
         }
         if (session.attention) Text("●", color = Color(0xFFE5A93C))
+        IconButton(onClick = onRename) { Text("✎") }
     }
 }

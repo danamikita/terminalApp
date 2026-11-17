@@ -143,6 +143,7 @@ export interface WebDriverDeps {
   subscribeSessionData: (sessionId: string, cb: (data: string) => void) => (() => void) | null;
   writeToSession: (sessionId: string, data: string) => boolean;
   resizeSession: (sessionId: string, cols: number, rows: number) => boolean;
+  renameSession: (sessionId: string, name: string) => boolean;
   listTrustedDevices: () => TrustedDevice[];
   addTrustedDevice: (device: TrustedDevice) => void;
   touchTrustedDevice: (deviceId: string) => void;
@@ -253,6 +254,7 @@ function controlPage(): string {
   .session-row:active { background: #2a2d2e; }
   .session-row .name { flex: 1; font-size: 14px; }
   .session-row .last-cmd { font-size: 11px; color: #888; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .session-row button { padding: 2px 8px; font-size: 11px; flex: none; }
   .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
   .dot.idle { background: #3c9d3c; }
   .dot.busy { background: #3a9fd9; box-shadow: 0 0 6px #3a9fd9; }
@@ -461,6 +463,14 @@ function controlPage(): string {
           row.addEventListener('click', () => {
             location.hash = '#/session/' + session.id;
           });
+          const renameBtn = document.createElement('button');
+          renameBtn.textContent = '✎';
+          renameBtn.title = 'Rename session';
+          renameBtn.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            renameSession(session);
+          });
+          row.appendChild(renameBtn);
           foldersEl.appendChild(row);
         }
       }
@@ -470,6 +480,27 @@ function controlPage(): string {
       const d = document.createElement('div');
       d.textContent = s;
       return d.innerHTML;
+    }
+
+    async function renameSession(session) {
+      const name = prompt('Rename session:', session.name);
+      if (name === null || !name.trim()) return;
+      try {
+        const res = await authedFetch('/session/' + session.id + '/rename', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name.trim() }),
+        });
+        const body = await res.json();
+        if (!body.ok) {
+          alert('Could not rename session.');
+          return;
+        }
+        refreshList();
+        if (session.id === currentSessionId) termTitleEl.textContent = name.trim();
+      } catch (e) {
+        alert('Could not rename session.');
+      }
     }
 
     async function startNewSession(folder) {
@@ -994,7 +1025,7 @@ export function startWebDriver(deps: WebDriverDeps, port: number): Promise<WebDr
       // Everything below requires the token (ephemeral, or a paired
       // device's persistent credential). EventSource can't set headers, so
       // the stream route accepts it as a query param instead.
-      const sessionMatch = /^\/session\/([^/]+)\/(buffer|stream|input|resize|paste-image)$/.exec(pathname);
+      const sessionMatch = /^\/session\/([^/]+)\/(buffer|stream|input|resize|paste-image|rename)$/.exec(pathname);
       const folderMatch = /^\/folder\/([^/]+)\/(session|files|file)$/.exec(pathname);
       const isStream = sessionMatch && sessionMatch[2] === 'stream';
       const suppliedToken = isStream ? query.get('token') || undefined : (req.headers['x-driver-token'] as string | undefined);
@@ -1126,6 +1157,28 @@ export function startWebDriver(deps: WebDriverDeps, port: number): Promise<WebDr
               return;
             }
             const ok = deps.resizeSession(sessionId, Math.round(cols), Math.round(rows));
+            sendJson(res, ok ? 200 : 404, { ok });
+          })
+          .catch((e) => sendJson(res, 500, { ok: false, error: (e as Error).message }));
+        return;
+      }
+
+      if (req.method === 'POST' && route === 'rename') {
+        readBody(req)
+          .then((body) => {
+            let parsed: { name?: string };
+            try {
+              parsed = JSON.parse(body);
+            } catch {
+              sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+              return;
+            }
+            const name = (parsed.name || '').trim();
+            if (!name) {
+              sendJson(res, 400, { ok: false, error: 'name must not be empty' });
+              return;
+            }
+            const ok = deps.renameSession(sessionId, name);
             sendJson(res, ok ? 200 : 404, { ok });
           })
           .catch((e) => sendJson(res, 500, { ok: false, error: (e as Error).message }));

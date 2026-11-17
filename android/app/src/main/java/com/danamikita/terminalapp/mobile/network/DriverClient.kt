@@ -111,6 +111,13 @@ class DriverClient(
         Unit
     }
 
+    suspend fun renameSession(sessionId: String, name: String) = withContext(Dispatchers.IO) {
+        val body = JSONObject().put("name", name).toString().toRequestBody(jsonMedia)
+        val req = authedRequest("/session/$sessionId/rename").post(body).build()
+        executeForBody(req)
+        Unit
+    }
+
     suspend fun resize(sessionId: String, cols: Int, rows: Int) = withContext(Dispatchers.IO) {
         val body = JSONObject().put("cols", cols).put("rows", rows).toString().toRequestBody(jsonMedia)
         val req = authedRequest("/session/$sessionId/resize").post(body).build()
