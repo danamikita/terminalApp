@@ -30,6 +30,25 @@ function loadClassicScript(src) {
   });
 }
 
+// Monaco's bundled TS/JS language service has no awareness of an opened
+// folder's actual tsconfig.json/jsconfig.json (unlike VS Code's real
+// tsserver, which reads the project's own config) — it just runs with its
+// own built-in defaults, which leave `jsx` unset. That makes any .jsx/.tsx
+// file show a spurious "Cannot use JSX unless the '--jsx' flag is provided"
+// diagnostic even though the real project compiles fine. Assume the modern
+// react-jsx transform here so that false positive goes away; this is a
+// blanket default applied to every opened project, not per-project config.
+function configureTypeScriptDefaults() {
+  const compilerOptions = {
+    jsx: monaco.languages.typescript.JsxEmit.ReactJSX,
+    allowNonTsExtensions: true,
+    allowJs: true,
+    esModuleInterop: true,
+  };
+  monaco.languages.typescript.typescriptDefaults.setCompilerOptions(compilerOptions);
+  monaco.languages.typescript.javascriptDefaults.setCompilerOptions(compilerOptions);
+}
+
 function ensureMonacoLoaded() {
   if (!monacoReadyPromise) {
     monacoReadyPromise = (async () => {
@@ -64,6 +83,7 @@ function ensureMonacoLoaded() {
           amdRequire(['vs/editor/editor.main'], resolve, reject);
         });
         monaco = window.monaco;
+        configureTypeScriptDefaults();
         registerCsharpProviders();
         defineCustomEditorThemes();
       } finally {
