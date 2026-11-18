@@ -7,6 +7,7 @@ import { execFileSync, execFile, exec } from 'child_process';
 import { loadConfig, saveConfig, makeFolder, setConfigDirName } from '../src/config';
 import { AppState, FolderConfig, FolderSnapshot, GitFileStatusCode, IdeRuleConfig, ShellType, TrustedDevice } from '../src/types';
 import { PtySession } from '../src/pty-session';
+import { OmniSharpServer, pathToFileUri } from '../src/omnisharp';
 import { findIdeMatches, buildLaunchPlan, defaultIdeRules } from '../src/ide-rules';
 import {
   getGitInfo,
@@ -31,6 +32,7 @@ import { savePastedImage } from './pasted-images';
 interface FolderState extends FolderConfig {
   sessions: PtySession[];
   expanded: boolean;
+  omnisharp?: OmniSharpServer;
 }
 
 const isTestMode = process.env.TERMINALAPP_TEST === '1';
@@ -65,7 +67,7 @@ function sendToWindow(channel: string, payload: unknown): void {
 
 function persist(): void {
   saveConfig({
-    folders: folders.map(({ sessions, expanded, ...f }) => f),
+    folders: folders.map(({ sessions, expanded, omnisharp, ...f }) => f),
     autoResume: autoResumeEnabled,
     ideRules,
     defaultShell,
@@ -127,6 +129,17 @@ function findSession(sessionId: string): PtySession | undefined {
     if (session) return session;
   }
   return undefined;
+}
+
+// One OmniSharp process per folder, started lazily the first time a C# file
+// is touched in it (not pre-detected — OmniSharp itself discovers any
+// .sln/.csproj under `cwd` recursively, so spawning eagerly for every folder
+// regardless of whether it has C# in it isn't worth the resource cost).
+function getOrCreateOmniSharp(folder: FolderState): OmniSharpServer {
+  if (!folder.omnisharp) {
+    folder.omnisharp = new OmniSharpServer({ folderId: folder.id, cwd: folder.path });
+  }
+  return folder.omnisharp;
 }
 
 function pathIsValidDir(p: string): boolean {
@@ -306,6 +319,7 @@ function createWindow(): void {
     persist();
     for (const folder of folders) {
       for (const session of folder.sessions) session.kill();
+      folder.omnisharp?.stop();
     }
   });
 
@@ -476,6 +490,7 @@ ipcMain.handle('app:remove-folder', (_e, args: { folderId: string }) => {
   const folder = findFolder(args.folderId);
   if (!folder) return { ok: false, error: 'Folder not found', state: getState() };
   for (const session of folder.sessions) session.kill();
+  folder.omnisharp?.stop();
   const idx = folders.indexOf(folder);
   if (idx >= 0) folders.splice(idx, 1);
   persist();
@@ -706,6 +721,67 @@ ipcMain.handle('fs:write-file', (_e, args: { filePath: string; content: string }
     return { ok: false, error: (e as Error).message };
   }
 });
+
+ipcMain.handle('csharp:did-open', async (_e, args: { folderId: string; filePath: string; text: string }) => {
+  const folder = findFolder(args.folderId);
+  if (!folder) return { ok: false, error: 'Folder not found' };
+  try {
+    await getOrCreateOmniSharp(folder).didOpen(pathToFileUri(args.filePath), 'csharp', args.text);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+});
+
+ipcMain.handle('csharp:did-change', async (_e, args: { folderId: string; filePath: string; text: string }) => {
+  const folder = findFolder(args.folderId);
+  if (!folder?.omnisharp) return { ok: false, error: 'Not started' };
+  await folder.omnisharp.didChange(pathToFileUri(args.filePath), args.text);
+  return { ok: true };
+});
+
+ipcMain.handle('csharp:did-close', async (_e, args: { folderId: string; filePath: string }) => {
+  const folder = findFolder(args.folderId);
+  if (!folder?.omnisharp) return { ok: true };
+  await folder.omnisharp.didClose(pathToFileUri(args.filePath));
+  return { ok: true };
+});
+
+ipcMain.handle(
+  'csharp:definition',
+  async (_e, args: { folderId: string; filePath: string; line: number; character: number }) => {
+    const folder = findFolder(args.folderId);
+    if (!folder) return { ok: false, error: 'Folder not found' };
+    try {
+      const server = getOrCreateOmniSharp(folder);
+      const locations = await server.definition(pathToFileUri(args.filePath), {
+        line: args.line,
+        character: args.character,
+      });
+      return { ok: true, locations };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
+    }
+  }
+);
+
+ipcMain.handle(
+  'csharp:references',
+  async (_e, args: { folderId: string; filePath: string; line: number; character: number }) => {
+    const folder = findFolder(args.folderId);
+    if (!folder) return { ok: false, error: 'Folder not found' };
+    try {
+      const server = getOrCreateOmniSharp(folder);
+      const locations = await server.references(pathToFileUri(args.filePath), {
+        line: args.line,
+        character: args.character,
+      });
+      return { ok: true, locations };
+    } catch (e) {
+      return { ok: false, error: (e as Error).message };
+    }
+  }
+);
 
 ipcMain.handle('git:info', (_e, args: { dirPath: string }) => getGitInfo(args.dirPath));
 

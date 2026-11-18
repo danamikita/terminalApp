@@ -64,6 +64,7 @@ function ensureMonacoLoaded() {
           amdRequire(['vs/editor/editor.main'], resolve, reject);
         });
         monaco = window.monaco;
+        registerCsharpProviders();
         defineCustomEditorThemes();
       } finally {
         window.require = savedRequire;
@@ -220,6 +221,9 @@ async function ensureSharedEditor() {
       tab.dirty = true;
       renderFilesTabs(activeFilesFolder);
     }
+    if (tab && tab.model === model && isCsharpFile(filePath)) {
+      debouncedCsharpDidChange(activeFilesFolder, filePath, model);
+    }
   });
   return sharedMonacoEditor;
 }
@@ -279,6 +283,9 @@ function monacoLanguageFor(filePath) {
       return 'cpp';
     case 'java':
       return 'java';
+    case 'cs':
+    case 'csx':
+      return 'csharp';
     case 'php':
       return 'php';
     default:
@@ -362,7 +369,10 @@ async function openFileInEditor(folder, filePath, preferPreview) {
   if (kind === 'edit' && res.ok) {
     await ensureSharedEditor();
     if (!tabs.has(filePath)) return; // closed while the editor was loading
-    tab.model = monaco.editor.createModel(tab.rawContent, monacoLanguageFor(filePath));
+    tab.model = monaco.editor.getModel(monaco.Uri.file(filePath)) || monaco.editor.createModel(tab.rawContent, monacoLanguageFor(filePath), monaco.Uri.file(filePath));
+    if (isCsharpFile(filePath)) {
+      ipcRenderer.invoke('csharp:did-open', { folderId: folder.id, filePath, text: tab.rawContent });
+    }
   }
 
   if (activeEditorTab.get(folder.id) === filePath && filesPanelState && filesPanelState.folderId === folder.id) {
@@ -404,6 +414,9 @@ function closeTab(folder, filePath) {
 
   if (tab.model) tab.model.dispose();
   tabs.delete(filePath);
+  if (isCsharpFile(filePath)) {
+    ipcRenderer.invoke('csharp:did-close', { folderId: folder.id, filePath });
+  }
 
   if (activeEditorTab.get(folder.id) === filePath) {
     const remaining = Array.from(tabs.keys());
@@ -430,8 +443,11 @@ function closeAllTabsForFolder(folder) {
     if (!ok) return false;
   }
 
-  for (const tab of tabs.values()) {
+  for (const [filePath, tab] of tabs) {
     if (tab.model) tab.model.dispose();
+    if (isCsharpFile(filePath)) {
+      ipcRenderer.invoke('csharp:did-close', { folderId: folder.id, filePath });
+    }
   }
   editorTabs.delete(folder.id);
   activeEditorTab.delete(folder.id);
@@ -472,7 +488,7 @@ function renderMarkdownPreview(filePath, tab) {
   const editBtn = el('button', 'md-edit', '✎ Edit');
   editBtn.addEventListener('click', async () => {
     await ensureSharedEditor();
-    if (!tab.model) tab.model = monaco.editor.createModel(tab.rawContent, monacoLanguageFor(filePath));
+    if (!tab.model) tab.model = monaco.editor.getModel(monaco.Uri.file(filePath)) || monaco.editor.createModel(tab.rawContent, monacoLanguageFor(filePath), monaco.Uri.file(filePath));
     tab.kind = 'edit';
     renderFilesTabs(activeFilesFolder);
   });
@@ -552,7 +568,7 @@ async function revealLineInEditor(folder, filePath, lineNumber, col) {
   if (!tab) return;
 
   const editor = await ensureSharedEditor();
-  if (!tab.model) tab.model = monaco.editor.createModel(tab.rawContent, monacoLanguageFor(filePath));
+  if (!tab.model) tab.model = monaco.editor.getModel(monaco.Uri.file(filePath)) || monaco.editor.createModel(tab.rawContent, monacoLanguageFor(filePath), monaco.Uri.file(filePath));
   tab.kind = 'edit';
   activeEditorTab.set(folder.id, filePath);
   renderFilesTabs(folder);
@@ -581,4 +597,174 @@ async function saveActiveTab(folder) {
   }
   tab.dirty = false;
   renderFilesTabs(folder, true);
+}
+
+// --- C# Go to Definition / Find All References (OmniSharp over IPC) ---
+//
+// Monaco's built-in goToDefinition/peek-reference contribution turns out not
+// to be reachable from this app's AMD min/vs build (monaco-editor's newer
+// Vite-chunked output splits that contribution into a separate hashed chunk
+// — e.g. editor-BdtEMBbM.js — that this build's bundled loader.js silently
+// fails to pull in via editor.main.js's own relative '../editor-BdtEMBbM'
+// dependency, even when requested explicitly alongside 'vs/editor/editor.main'
+// in ensureMonacoLoaded; monaco.languages.registerDefinitionProvider/
+// registerReferenceProvider end up with no Monaco UI wired to them at all).
+// So instead of relying on that, these are plain editor.addAction entries —
+// same right-click commands, implemented directly against the csharp:*
+// IPC handlers in main.ts (which own the actual OmniSharp language-server
+// process, see src/omnisharp.ts), with navigation via the existing
+// openFileInEditor/revealLineInEditor pair and a native popup menu
+// (app:popup-menu, the same one used for the "run script" right-click) when
+// a reference search returns more than one hit.
+
+function isCsharpFile(filePath) {
+  return monacoLanguageFor(filePath) === 'csharp';
+}
+
+// LSP uses file:// URIs (percent-encoded); this is the renderer-side mirror
+// of src/omnisharp.ts's fileUriToPath. OmniSharp always lowercases the drive
+// letter in returned URIs (file:///c:/...) regardless of how the path was
+// sent to it, while every other path string in this app (folder.path, open
+// tab keys) keeps the OS's original uppercase casing — uppercase it back
+// here so paths derived from LSP responses compare equal to those, instead
+// of silently failing folderForPath lookups and editorTabs key matches.
+function lspUriToPath(uri) {
+  let decoded = decodeURI(uri.replace(/^file:\/\//, ''));
+  if (/^\/[A-Za-z]:\//.test(decoded)) decoded = decoded.slice(1);
+  return decoded.replace(/^[a-z]:/, (m) => m.toUpperCase());
+}
+
+// Monaco model object -> the folder whose open tabs contain it. Models have
+// no built-in back-reference to a folder, so this scans editorTabs (fine at
+// "tabs a human has open" scale, same spirit as main.ts's linear-scan
+// findFolder/findSession helpers).
+function folderForModel(model) {
+  for (const [folderId, tabs] of editorTabs) {
+    for (const tab of tabs.values()) {
+      if (tab.model === model) return state.folders.find((f) => f.id === folderId) || null;
+    }
+  }
+  return null;
+}
+
+function filePathForModel(folder, model) {
+  const tabs = editorTabs.get(folder.id);
+  if (!tabs) return null;
+  for (const [filePath, tab] of tabs) {
+    if (tab.model === model) return filePath;
+  }
+  return null;
+}
+
+// Which open folder (sidebar root) a given absolute path lives under, if
+// any — used when a definition/reference jump lands in a file that has no
+// open tab yet, so there's no editorTabs entry to resolve it from.
+//
+// Windows path comparisons here need to be case-insensitive on the drive
+// letter at least: OmniSharp's LSP URIs always come back with a lowercased
+// drive letter (file:///c:/...) regardless of how the path was sent to it,
+// while folder.path keeps whatever case the OS/user originally gave it
+// (typically uppercase, e.g. "C:\\Users\\...") — a strict comparison would
+// silently fail to match every single cross-file jump on Windows.
+function folderForPath(filePath) {
+  const resolved = path.resolve(filePath);
+  const normalize = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
+  const target = normalize(resolved);
+  return (
+    state.folders.find((f) => {
+      const root = normalize(path.resolve(f.path));
+      return target === root || target.startsWith(root + path.sep);
+    }) || null
+  );
+}
+
+// Opens (or activates) the tab for an LSP location and moves the cursor
+// there — the same two-step open+reveal primitive search-result clicks use.
+async function jumpToLspLocation(loc) {
+  const filePath = lspUriToPath(loc.uri);
+  const folder = folderForPath(filePath);
+  if (!folder) return;
+  await openFileInEditor(folder, filePath, false);
+  revealLineInEditor(folder, filePath, loc.range.start.line + 1, loc.range.start.character);
+}
+
+// Find All References can come back with several hits — ask via the same
+// native popup menu the file browser's "run script" right-click uses
+// (app:popup-menu) rather than inventing another list UI.
+async function pickAndJumpToLocation(locations) {
+  if (!locations || locations.length === 0) return;
+  if (locations.length === 1) {
+    await jumpToLspLocation(locations[0]);
+    return;
+  }
+  const items = locations.map((loc, i) => ({
+    id: String(i),
+    label: `${basename(lspUriToPath(loc.uri))} — line ${loc.range.start.line + 1}`,
+  }));
+  const choice = await ipcRenderer.invoke('app:popup-menu', { items });
+  if (choice == null) return;
+  await jumpToLspLocation(locations[Number(choice)]);
+}
+
+async function requestCsharpLocations(channel, editorInstance) {
+  const model = editorInstance.getModel();
+  const position = editorInstance.getPosition();
+  if (!model || !position) return null;
+  const folder = folderForModel(model);
+  if (!folder) return null;
+  const filePath = filePathForModel(folder, model);
+  if (!filePath) return null;
+  const res = await ipcRenderer.invoke(channel, {
+    folderId: folder.id,
+    filePath,
+    line: position.lineNumber - 1,
+    character: position.column - 1,
+  });
+  return res.ok ? res.locations : null;
+}
+
+const csharpDidChangeTimers = new Map(); // filePath -> timeout id
+function debouncedCsharpDidChange(folder, filePath, model) {
+  clearTimeout(csharpDidChangeTimers.get(filePath));
+  csharpDidChangeTimers.set(
+    filePath,
+    setTimeout(() => {
+      csharpDidChangeTimers.delete(filePath);
+      ipcRenderer.invoke('csharp:did-change', { folderId: folder.id, filePath, text: model.getValue() });
+    }, 300)
+  );
+}
+
+let csharpProvidersRegistered = false;
+function registerCsharpProviders() {
+  if (csharpProvidersRegistered) return;
+  csharpProvidersRegistered = true;
+
+  ensureSharedEditor().then((ed) => {
+    ed.addAction({
+      id: 'csharp.goToDefinition',
+      label: 'Go to Definition',
+      precondition: "editorLangId == 'csharp'",
+      contextMenuGroupId: 'navigation',
+      contextMenuOrder: 1.1,
+      keybindings: [monaco.KeyCode.F12],
+      run: async (editorInstance) => {
+        const locations = await requestCsharpLocations('csharp:definition', editorInstance);
+        await pickAndJumpToLocation(locations);
+      },
+    });
+
+    ed.addAction({
+      id: 'csharp.findReferences',
+      label: 'Find All References',
+      precondition: "editorLangId == 'csharp'",
+      contextMenuGroupId: 'navigation',
+      contextMenuOrder: 1.2,
+      keybindings: [monaco.KeyMod.Shift | monaco.KeyCode.F12],
+      run: async (editorInstance) => {
+        const locations = await requestCsharpLocations('csharp:references', editorInstance);
+        await pickAndJumpToLocation(locations);
+      },
+    });
+  });
 }
