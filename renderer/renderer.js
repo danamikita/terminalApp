@@ -60,6 +60,7 @@ const settingsAddRuleBtn = document.getElementById('settings-add-rule');
 const settingsCancelBtn = document.getElementById('settings-cancel');
 const settingsSaveBtn = document.getElementById('settings-save');
 const settingsDefaultShellSelect = document.getElementById('settings-default-shell');
+const settingsEditorThemeSelect = document.getElementById('settings-editor-theme');
 const settingsDevicesEl = document.getElementById('settings-devices');
 
 const overlay = document.getElementById('modal-overlay');
@@ -1303,15 +1304,40 @@ function renderSettingsDevices() {
   }
 }
 
+// Theme in effect when Settings was opened — restored on Cancel since picking
+// a theme in the dropdown previews it live (Monaco's theme is a single global,
+// see editor.js's EDITOR_THEMES comment), not just in the preview snippet.
+let settingsOriginalTheme = 'vs-dark';
+
 settingsBtn.addEventListener('click', async () => {
+  // Populated lazily (not at script load) since EDITOR_THEMES lives in editor.js,
+  // which loads after renderer.js and wouldn't be defined yet at the top level here.
+  if (settingsEditorThemeSelect.options.length === 0) {
+    for (const t of EDITOR_THEMES) {
+      const opt = document.createElement('option');
+      opt.value = t.id;
+      opt.textContent = t.label;
+      settingsEditorThemeSelect.appendChild(opt);
+    }
+  }
   const res = await ipcRenderer.invoke('app:get-ide-rules');
   editingIdeRules = (res.rules || []).map((r) => ({ ...r }));
   renderSettingsRules();
   settingsDefaultShellSelect.value = res.defaultShell || 'cmd';
+  settingsOriginalTheme = res.editorTheme || 'vs-dark';
+  settingsEditorThemeSelect.value = settingsOriginalTheme;
   const devicesRes = await ipcRenderer.invoke('app:get-trusted-devices');
   trustedDevicesList = devicesRes.devices || [];
   renderSettingsDevices();
   settingsOverlay.classList.remove('hidden');
+  // Created after the overlay is shown, not before, so Monaco never has to
+  // measure a display:none container.
+  await ensureThemePreviewEditor();
+  previewEditorTheme(settingsOriginalTheme);
+});
+
+settingsEditorThemeSelect.addEventListener('change', () => {
+  previewEditorTheme(settingsEditorThemeSelect.value);
 });
 
 settingsAddRuleBtn.addEventListener('click', () => {
@@ -1320,6 +1346,7 @@ settingsAddRuleBtn.addEventListener('click', () => {
 });
 
 settingsCancelBtn.addEventListener('click', () => {
+  previewEditorTheme(settingsOriginalTheme);
   settingsOverlay.classList.add('hidden');
 });
 
@@ -1330,8 +1357,12 @@ settingsSaveBtn.addEventListener('click', async () => {
   const res = await ipcRenderer.invoke('app:save-ide-rules', {
     rules: cleaned,
     defaultShell: settingsDefaultShellSelect.value,
+    editorTheme: settingsEditorThemeSelect.value,
   });
-  if (state) state.defaultShell = res.defaultShell;
+  if (state) {
+    state.defaultShell = res.defaultShell;
+    state.editorTheme = res.editorTheme;
+  }
   settingsOverlay.classList.add('hidden');
   refreshIdeMatches();
 });

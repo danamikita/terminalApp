@@ -64,6 +64,7 @@ function ensureMonacoLoaded() {
           amdRequire(['vs/editor/editor.main'], resolve, reject);
         });
         monaco = window.monaco;
+        defineCustomEditorThemes();
       } finally {
         window.require = savedRequire;
         window.module = savedModule;
@@ -74,6 +75,120 @@ function ensureMonacoLoaded() {
     })();
   }
   return monacoReadyPromise;
+}
+
+// Themes offered in Settings. 'vs-dark'/'vs'/'hc-black'/'hc-light' are Monaco's
+// own built-ins; the rest are defined below in defineCustomEditorThemes() from
+// each palette's published color spec (Dracula, Monokai, Nord, Solarized).
+const EDITOR_THEMES = [
+  { id: 'vs-dark', label: 'Dark (default)' },
+  { id: 'vs', label: 'Light' },
+  { id: 'hc-black', label: 'High Contrast Dark' },
+  { id: 'hc-light', label: 'High Contrast Light' },
+  { id: 'dracula', label: 'Dracula' },
+  { id: 'monokai', label: 'Monokai' },
+  { id: 'nord', label: 'Nord' },
+  { id: 'solarized-dark', label: 'Solarized Dark' },
+  { id: 'solarized-light', label: 'Solarized Light' },
+];
+
+// Monaco's theme is a single global (monaco.editor.setTheme swaps it for every
+// editor instance at once), so these just need defining once up front — picking
+// one in Settings, including live preview, is a plain setTheme() call from then on.
+function defineCustomEditorThemes() {
+  const palette = (base, bg, fg, lineHighlight, selection, cursor, lineNumber, tokenColors) => ({
+    base,
+    inherit: true,
+    rules: [
+      { token: 'comment', foreground: tokenColors.comment, fontStyle: 'italic' },
+      { token: 'string', foreground: tokenColors.string },
+      { token: 'number', foreground: tokenColors.number },
+      { token: 'keyword', foreground: tokenColors.keyword, fontStyle: 'bold' },
+      { token: 'type', foreground: tokenColors.type, fontStyle: 'italic' },
+      { token: 'delimiter', foreground: tokenColors.delimiter },
+      { token: 'operator', foreground: tokenColors.operator },
+      { token: 'tag', foreground: tokenColors.tag },
+      { token: 'attribute.name', foreground: tokenColors.attributeName },
+      { token: 'annotation', foreground: tokenColors.annotation },
+      { token: 'regexp', foreground: tokenColors.regexp },
+    ],
+    colors: {
+      'editor.background': bg,
+      'editor.foreground': fg,
+      'editor.lineHighlightBackground': lineHighlight,
+      'editor.selectionBackground': selection,
+      'editorCursor.foreground': cursor,
+      'editorLineNumber.foreground': lineNumber,
+    },
+  });
+
+  monaco.editor.defineTheme('dracula', palette('vs-dark', '#282a36', '#f8f8f2', '#33344a', '#44475a', '#f8f8f0', '#6272a4', {
+    comment: '6272a4', string: 'f1fa8c', number: 'bd93f9', keyword: 'ff79c6', type: '8be9fd',
+    delimiter: 'f8f8f2', operator: 'ff79c6', tag: 'ff79c6', attributeName: '50fa7b', annotation: 'ffb86c', regexp: 'ff5555',
+  }));
+  monaco.editor.defineTheme('monokai', palette('vs-dark', '#272822', '#f8f8f2', '#3e3d32', '#49483e', '#f8f8f0', '#90908a', {
+    comment: '75715e', string: 'e6db74', number: 'ae81ff', keyword: 'f92672', type: '66d9ef',
+    delimiter: 'f8f8f2', operator: 'f92672', tag: 'f92672', attributeName: 'a6e22e', annotation: 'fd971f', regexp: 'fd971f',
+  }));
+  monaco.editor.defineTheme('nord', palette('vs-dark', '#2e3440', '#d8dee9', '#3b4252', '#434c5e', '#d8dee9', '#4c566a', {
+    comment: '616e88', string: 'a3be8c', number: 'b48ead', keyword: '81a1c1', type: '8fbcbb',
+    delimiter: 'eceff4', operator: '81a1c1', tag: '81a1c1', attributeName: '8fbcbb', annotation: 'd08770', regexp: 'ebcb8b',
+  }));
+  monaco.editor.defineTheme('solarized-dark', palette('vs-dark', '#002b36', '#839496', '#073642', '#073642', '#839496', '#586e75', {
+    comment: '586e75', string: '2aa198', number: 'd33682', keyword: '859900', type: 'b58900',
+    delimiter: '839496', operator: '859900', tag: '268bd2', attributeName: '93a1a1', annotation: 'cb4b16', regexp: 'dc322f',
+  }));
+  monaco.editor.defineTheme('solarized-light', palette('vs', '#fdf6e3', '#657b83', '#eee8d5', '#eee8d5', '#657b83', '#93a1a1', {
+    comment: '93a1a1', string: '2aa198', number: 'd33682', keyword: '859900', type: 'b58900',
+    delimiter: '657b83', operator: '859900', tag: '268bd2', attributeName: '586e75', annotation: 'cb4b16', regexp: 'dc322f',
+  }));
+}
+
+// Sample snippet shown in the Settings theme preview — picked to light up most
+// of the token rules above (comment, string, number, keyword, type, tag).
+const EDITOR_THEME_PREVIEW_SNIPPET = `// Pick a theme to preview it here
+import { useState } from "react";
+
+/** Returns true for primes > 1. */
+function isPrime(n: number): boolean {
+  if (n < 2) return false;
+  for (let i = 2; i * i <= n; i++) {
+    if (n % i === 0) return false;
+  }
+  return true;
+}
+
+const tag = <div className="demo">{isPrime(17)}</div>;
+`;
+
+let themePreviewEditor = null;
+const themePreviewHostEl = document.getElementById('settings-theme-preview');
+
+// Settings modal calls this once, when it opens, to create (or just re-show)
+// the preview instance — kept separate from sharedMonacoEditor since it needs
+// its own read-only model and lives inside the settings overlay, not the Files tab.
+async function ensureThemePreviewEditor() {
+  await ensureMonacoLoaded();
+  if (themePreviewEditor) return themePreviewEditor;
+  themePreviewEditor = monaco.editor.create(themePreviewHostEl, {
+    value: EDITOR_THEME_PREVIEW_SNIPPET,
+    language: 'typescript',
+    readOnly: true,
+    automaticLayout: true,
+    fontSize: 13,
+    fontFamily: 'Consolas, "Courier New", monospace',
+    minimap: { enabled: false },
+    scrollBeyondLastLine: false,
+    lineNumbers: 'off',
+  });
+  return themePreviewEditor;
+}
+
+// Applies immediately and globally (see note on EDITOR_THEMES above) — used both
+// for live preview as the Settings dropdown changes and to commit the choice on Save.
+function previewEditorTheme(themeId) {
+  if (!monaco) return;
+  monaco.editor.setTheme(themeId);
 }
 
 // Kick off loading immediately so it's warm by the time a file is clicked.
@@ -87,7 +202,7 @@ async function ensureSharedEditor() {
   if (sharedMonacoEditor) return sharedMonacoEditor;
   sharedMonacoEditor = monaco.editor.create(monacoHostEl, {
     automaticLayout: true,
-    theme: 'vs-dark',
+    theme: (state && state.editorTheme) || 'vs-dark',
     fontSize: 13,
     fontFamily: 'Consolas, "Courier New", monospace',
     minimap: { enabled: false },

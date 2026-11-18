@@ -45,6 +45,7 @@ export interface AppConfig {
   ideRules?: IdeRuleConfig[];
   defaultShell?: ShellType;
   trustedDevices?: TrustedDevice[];
+  editorTheme?: string;
 }
 
 export interface SessionSnapshot {
@@ -73,6 +74,7 @@ export interface AppState {
   folders: FolderSnapshot[];
   autoResume: boolean;
   defaultShell: ShellType;
+  editorTheme: string;
 }
 
 export type GitInfo =

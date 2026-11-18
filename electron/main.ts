@@ -48,6 +48,7 @@ const folders: FolderState[] = config.folders.map((f) => ({ ...f, sessions: [], 
 let autoResumeEnabled = isTestMode ? false : config.autoResume !== false;
 let ideRules: IdeRuleConfig[] = config.ideRules && config.ideRules.length > 0 ? config.ideRules : defaultIdeRules();
 let defaultShell: ShellType = config.defaultShell || 'cmd';
+let editorTheme: string = config.editorTheme || 'vs-dark';
 let trustedDevices: TrustedDevice[] = config.trustedDevices || [];
 let lastSeenFlushTimer: NodeJS.Timeout | null = null;
 
@@ -69,6 +70,7 @@ function persist(): void {
     ideRules,
     defaultShell,
     trustedDevices,
+    editorTheme,
   });
 }
 
@@ -201,6 +203,7 @@ function getState(): AppState {
   return {
     autoResume: autoResumeEnabled,
     defaultShell,
+    editorTheme,
     folders: folders.map<FolderSnapshot>((f) => ({
       id: f.id,
       name: f.name,
@@ -771,13 +774,14 @@ ipcMain.handle('app:launch-ide', (_e, args: { dirPath: string; ruleId: string; f
   return { ok: true };
 });
 
-ipcMain.handle('app:get-ide-rules', () => ({ rules: ideRules, defaultShell }));
+ipcMain.handle('app:get-ide-rules', () => ({ rules: ideRules, defaultShell, editorTheme }));
 
-ipcMain.handle('app:save-ide-rules', (_e, args: { rules: IdeRuleConfig[]; defaultShell?: ShellType }) => {
+ipcMain.handle('app:save-ide-rules', (_e, args: { rules: IdeRuleConfig[]; defaultShell?: ShellType; editorTheme?: string }) => {
   ideRules = args.rules;
   if (args.defaultShell) defaultShell = args.defaultShell;
+  if (args.editorTheme) editorTheme = args.editorTheme;
   persist();
-  return { ok: true, rules: ideRules, defaultShell };
+  return { ok: true, rules: ideRules, defaultShell, editorTheme };
 });
 
 ipcMain.handle('app:get-info', () => ({
