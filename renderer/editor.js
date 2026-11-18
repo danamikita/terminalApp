@@ -647,7 +647,7 @@ function isCsharpFile(filePath) {
 // sent to it, while every other path string in this app (folder.path, open
 // tab keys) keeps the OS's original uppercase casing — uppercase it back
 // here so paths derived from LSP responses compare equal to those, instead
-// of silently failing folderForPath lookups and editorTabs key matches.
+// of silently failing editorTabs key matches.
 function lspUriToPath(uri) {
   let decoded = decodeURI(uri.replace(/^file:\/\//, ''));
   if (/^\/[A-Za-z]:\//.test(decoded)) decoded = decoded.slice(1);
@@ -676,34 +676,22 @@ function filePathForModel(folder, model) {
   return null;
 }
 
-// Which open folder (sidebar root) a given absolute path lives under, if
-// any — used when a definition/reference jump lands in a file that has no
-// open tab yet, so there's no editorTabs entry to resolve it from.
-//
-// Windows path comparisons here need to be case-insensitive on the drive
-// letter at least: OmniSharp's LSP URIs always come back with a lowercased
-// drive letter (file:///c:/...) regardless of how the path was sent to it,
-// while folder.path keeps whatever case the OS/user originally gave it
-// (typically uppercase, e.g. "C:\\Users\\...") — a strict comparison would
-// silently fail to match every single cross-file jump on Windows.
-function folderForPath(filePath) {
-  const resolved = path.resolve(filePath);
-  const normalize = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
-  const target = normalize(resolved);
-  return (
-    state.folders.find((f) => {
-      const root = normalize(path.resolve(f.path));
-      return target === root || target.startsWith(root + path.sep);
-    }) || null
-  );
-}
-
 // Opens (or activates) the tab for an LSP location and moves the cursor
 // there — the same two-step open+reveal primitive search-result clicks use.
-async function jumpToLspLocation(loc) {
+// Always navigates within `folder` — the SAME folder whose OmniSharp
+// instance resolved this location — even when the location is a cross-
+// project file that lives outside that folder's own directory on disk
+// (e.g. Go to Definition/Find References landing in a sibling project of a
+// multi-project .sln where only one project's folder is tracked in
+// Folderminal's sidebar). openFileInEditor isn't filesystem-sandboxed to
+// folder.path — only the file browser TREE is — so this is safe, and it's
+// what makes solution-wide navigation actually work instead of silently
+// no-op'ing the moment a result falls outside the tracked folder's root
+// (an earlier version of this code resolved the folder from the target
+// path instead, via `state.folders.find(f => filePath.startsWith(f.path))`,
+// which is exactly the check that broke this).
+async function jumpToLspLocation(folder, loc) {
   const filePath = lspUriToPath(loc.uri);
-  const folder = folderForPath(filePath);
-  if (!folder) return;
   await openFileInEditor(folder, filePath, false);
   revealLineInEditor(folder, filePath, loc.range.start.line + 1, loc.range.start.character);
 }
@@ -711,10 +699,10 @@ async function jumpToLspLocation(loc) {
 // Find All References can come back with several hits — ask via the same
 // native popup menu the file browser's "run script" right-click uses
 // (app:popup-menu) rather than inventing another list UI.
-async function pickAndJumpToLocation(locations) {
+async function pickAndJumpToLocation(folder, locations) {
   if (!locations || locations.length === 0) return;
   if (locations.length === 1) {
-    await jumpToLspLocation(locations[0]);
+    await jumpToLspLocation(folder, locations[0]);
     return;
   }
   const items = locations.map((loc, i) => ({
@@ -723,24 +711,24 @@ async function pickAndJumpToLocation(locations) {
   }));
   const choice = await ipcRenderer.invoke('app:popup-menu', { items });
   if (choice == null) return;
-  await jumpToLspLocation(locations[Number(choice)]);
+  await jumpToLspLocation(folder, locations[Number(choice)]);
 }
 
 async function requestCsharpLocations(channel, editorInstance) {
   const model = editorInstance.getModel();
   const position = editorInstance.getPosition();
-  if (!model || !position) return null;
+  if (!model || !position) return { folder: null, locations: null };
   const folder = folderForModel(model);
-  if (!folder) return null;
+  if (!folder) return { folder: null, locations: null };
   const filePath = filePathForModel(folder, model);
-  if (!filePath) return null;
+  if (!filePath) return { folder, locations: null };
   const res = await ipcRenderer.invoke(channel, {
     folderId: folder.id,
     filePath,
     line: position.lineNumber - 1,
     character: position.column - 1,
   });
-  return res.ok ? res.locations : null;
+  return { folder, locations: res.ok ? res.locations : null };
 }
 
 const csharpDidChangeTimers = new Map(); // filePath -> timeout id
@@ -769,8 +757,8 @@ function registerCsharpProviders() {
       contextMenuOrder: 1.1,
       keybindings: [monaco.KeyCode.F12],
       run: async (editorInstance) => {
-        const locations = await requestCsharpLocations('csharp:definition', editorInstance);
-        await pickAndJumpToLocation(locations);
+        const { folder, locations } = await requestCsharpLocations('csharp:definition', editorInstance);
+        if (folder) await pickAndJumpToLocation(folder, locations);
       },
     });
 
@@ -782,8 +770,8 @@ function registerCsharpProviders() {
       contextMenuOrder: 1.2,
       keybindings: [monaco.KeyMod.Shift | monaco.KeyCode.F12],
       run: async (editorInstance) => {
-        const locations = await requestCsharpLocations('csharp:references', editorInstance);
-        await pickAndJumpToLocation(locations);
+        const { folder, locations } = await requestCsharpLocations('csharp:references', editorInstance);
+        if (folder) await pickAndJumpToLocation(folder, locations);
       },
     });
   });
